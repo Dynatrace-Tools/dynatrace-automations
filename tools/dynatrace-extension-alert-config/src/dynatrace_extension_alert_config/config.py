@@ -60,9 +60,28 @@ def prompt_credentials() -> dict:
     return creds
 
 
-def get_or_prompt_credentials(reconfigure: bool = False) -> dict:
+def env_id_to_url(env_id: str) -> str:
+    """Convert a bare environment ID to its SaaS base URL.
+
+    'abc12345' -> 'https://abc12345.live.dynatrace.com'
+    Idempotent: a full URL is returned unchanged.
+    """
+    env_id = env_id.strip().rstrip("/")
+    if env_id.startswith("http"):
+        return env_id
+    return f"https://{env_id}.live.dynatrace.com"
+
+
+def get_or_prompt_credentials(reconfigure: bool = False, env_id: Optional[str] = None) -> dict:
     if not reconfigure:
         creds = load_credentials()
         if creds:
+            if env_id:
+                creds = dict(creds)
+                creds["environmentUrl"] = env_id_to_url(env_id)
             return creds
-    return prompt_credentials()
+    creds = prompt_credentials()
+    if env_id:
+        creds = dict(creds)
+        creds["environmentUrl"] = env_id_to_url(env_id)
+    return creds

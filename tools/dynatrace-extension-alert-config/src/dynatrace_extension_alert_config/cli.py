@@ -43,21 +43,35 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print the JSON payloads that would be sent, without making API calls.",
     )
+    parser.add_argument(
+        "--env-id",
+        metavar="ENV_ID",
+        help=(
+            "Dynatrace environment ID (e.g. 'abc12345'). "
+            "Constructs https://<env-id>.live.dynatrace.com and overrides the "
+            "stored environmentUrl for this run."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
 
+    env_url_hint = ""
+    if args.env_id:
+        from .config import env_id_to_url
+        env_url_hint = f"\nEnvironment: [dim]{env_id_to_url(args.env_id)}[/dim]"
+
     console.print(Panel(
-        "[bold]Dynatrace Extension Alert Config[/bold]\n"
-        f"Extension: [cyan]{args.name}[/cyan]",
+        f"[bold]Dynatrace Extension Alert Config[/bold]\n"
+        f"Extension: [cyan]{args.name}[/cyan]{env_url_hint}",
         border_style="blue",
     ))
 
     # ── 1. Credentials ─────────────────────────────────────────────────────
     try:
-        creds = get_or_prompt_credentials(reconfigure=args.reconfigure)
+        creds = get_or_prompt_credentials(reconfigure=args.reconfigure, env_id=args.env_id)
     except KeyboardInterrupt:
         console.print("\n[yellow]Aborted.[/yellow]")
         sys.exit(0)

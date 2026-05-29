@@ -46,6 +46,9 @@ dynatrace-extension-alert-config --name "Meraki Extension"
 dynatrace-extension-alert-config --name meraki
 dynatrace-extension-alert-config --name "MERAKI extension"
 
+# Target a specific environment by ID (overrides the stored environmentUrl)
+dynatrace-extension-alert-config --name meraki --env-id abc12345
+
 # Preview JSON payloads without making any API calls
 dynatrace-extension-alert-config --name meraki --dry-run
 
@@ -55,6 +58,16 @@ dynatrace-extension-alert-config --name meraki --yes
 # Re-enter credentials
 dynatrace-extension-alert-config --name meraki --reconfigure
 ```
+
+### Flags
+
+| Flag | Effect |
+|---|---|
+| `--name` | Extension display name — fuzzy-matched, casing and the word "extension" are ignored |
+| `--env-id` | Dynatrace environment ID (e.g. `abc12345`). Constructs `https://<env-id>.live.dynatrace.com` and overrides the stored `environmentUrl` for this run only. |
+| `--reconfigure` | Re-enter and re-save OAuth credentials |
+| `--dry-run` | Print JSON payloads, no API calls made |
+| `--yes` | Non-interactive: create Auto-Adaptive / Above detectors for every metric |
 
 ### Interactive flow
 
