@@ -5,20 +5,40 @@ The classic ``/api/v2/extensions/{name}/{version}`` JSON only returns feature-se
 feature-set mapping is the extension's ``extension.yaml``, which we obtain by
 downloading the extension package (a zip) and reading that file.
 
-extension.yaml shape (datasource-dependent), simplified::
+Per the Dynatrace docs, **metric keys appear only in two places**:
 
-    metrics:                       # top-level: metric metadata
-      - key: meraki.device.cpu_usage
-        metadata:
-          displayName: Meraki Appliance CPU Usage
-          description: CPU Usage ...
+1. The top-level ``metrics:`` block — the canonical list of metric keys, each
+   with ``metadata`` (displayName, description, unit)::
 
-    <datasource>:                  # e.g. python, snmp, sql, prometheus, wmi
-      ...
-        - featureSet: device-cpu   # feature set assigned to a group/subgroup
-          ...
-          metrics:
-            - key: meraki.device.cpu_usage
+       metrics:
+         - key: meraki.device.cpu_usage
+           metadata:
+             displayName: Meraki Appliance CPU Usage
+             description: CPU Usage ...
+
+2. Inside ``metrics:`` lists within feature-set / group / subgroup definitions,
+   which is what assigns a metric to a feature set. Two layouts exist:
+
+   - Python extensions: a top-level ``featureSets:`` list::
+
+         featureSets:
+           - featureSet: device-cpu
+             metrics:
+               - key: meraki.device.cpu_usage
+
+   - SNMP / SQL / Prometheus / WMI: ``featureSet`` on a group/subgroup,
+     inherited by the nested ``metrics:`` list::
+
+         snmp:
+           - featureSet: device-cpu
+             subgroups:
+               - metrics:
+                   - key: meraki.device.cpu_usage
+
+Crucially, every OTHER ``key`` in the file — dimensions, topology attributes,
+entity/chart/DQL definitions — is **not** a metric and must be ignored. We
+therefore only ever read keys from the top-level ``metrics:`` block and from
+``metrics:`` lists, never from arbitrary ``key`` fields.
 
 Feature sets are inherited: a metric inherits the subgroup's feature set, which
 inherits the group's. A more specific ``featureSet`` overrides a less specific
@@ -60,13 +80,14 @@ def _find_extension_yaml(zip_bytes: bytes) -> Optional[str]:
 
 
 def _collect_metric_metadata(doc: dict) -> dict[str, Metric]:
-    """Read the top-level ``metrics:`` list for display name + description."""
+    """Read the top-level ``metrics:`` list for the canonical metric keys and
+    their display name + description."""
     out: dict[str, Metric] = {}
     for m in doc.get("metrics", []) or []:
         if not isinstance(m, dict):
             continue
         key = m.get("key")
-        if not key:
+        if not isinstance(key, str) or not key:
             continue
         meta = m.get("metadata", {}) or {}
         out[key] = Metric(
@@ -77,33 +98,38 @@ def _collect_metric_metadata(doc: dict) -> dict[str, Metric]:
     return out
 
 
-def _walk_feature_sets(node, inherited_fs: str, mapping: dict[str, str]) -> None:
-    """Recursively assign feature sets to metric keys, honoring inheritance.
+def _assign(mapping: dict[str, str], key: str, feature_set: str) -> None:
+    """Record a metric's feature set, preferring a specific one over default."""
+    existing = mapping.get(key)
+    if existing is None or (existing == DEFAULT_FEATURE_SET and feature_set != DEFAULT_FEATURE_SET):
+        mapping[key] = feature_set
 
-    Carries the nearest ``featureSet`` down the tree. A metric node (a dict
-    with a string ``key``) is assigned the most specific feature set in scope.
-    A non-default assignment never gets overwritten by a default one.
+
+def _walk_feature_sets(node, inherited_fs: str, mapping: dict[str, str]) -> None:
+    """Walk the document, assigning feature sets to metric keys.
+
+    Keys are read ONLY from ``metrics:`` lists, never from arbitrary ``key``
+    fields, so dimensions/topology/chart keys are never mistaken for metrics.
+    The nearest ``featureSet`` in scope (group/subgroup/feature-set entry) is
+    inherited; an entry's own ``featureSet`` overrides it.
     """
     if isinstance(node, dict):
-        current_fs = node.get("featureSet", inherited_fs)
-        if isinstance(current_fs, str) and current_fs:
-            pass
-        else:
-            current_fs = inherited_fs
-
-        key = node.get("key")
-        if isinstance(key, str) and key:
-            assigned = node.get("featureSet", current_fs)
-            if not isinstance(assigned, str) or not assigned:
-                assigned = current_fs
-            existing = mapping.get(key)
-            if existing is None or (existing == DEFAULT_FEATURE_SET and assigned != DEFAULT_FEATURE_SET):
-                mapping[key] = assigned
+        fs = node.get("featureSet")
+        current_fs = fs if isinstance(fs, str) and fs else inherited_fs
 
         for k, v in node.items():
-            if k in ("metadata",):  # metadata never carries metric structure
-                continue
-            _walk_feature_sets(v, current_fs, mapping)
+            if k == "metrics" and isinstance(v, list):
+                for item in v:
+                    if not isinstance(item, dict):
+                        continue
+                    key = item.get("key")
+                    if not isinstance(key, str) or not key:
+                        continue
+                    item_fs = item.get("featureSet")
+                    assigned = item_fs if isinstance(item_fs, str) and item_fs else current_fs
+                    _assign(mapping, key, assigned)
+            else:
+                _walk_feature_sets(v, current_fs, mapping)
     elif isinstance(node, list):
         for item in node:
             _walk_feature_sets(item, inherited_fs, mapping)
@@ -114,12 +140,12 @@ def parse_extension_yaml(text: str, ext_display_name: str) -> ExtensionInfo:
 
     metadata = _collect_metric_metadata(doc)
 
-    # Build metric -> feature set across the whole document (datasource sections).
+    # metric key -> feature set, harvested only from metrics: lists.
     fs_mapping: dict[str, str] = {}
     _walk_feature_sets(doc, DEFAULT_FEATURE_SET, fs_mapping)
 
-    # Union of all known metric keys: those with metadata and those discovered
-    # in datasource definitions.
+    # Authoritative metric set = top-level metrics block plus any key referenced
+    # in a metrics: list. Both sources are real metrics; nothing else qualifies.
     all_keys = set(metadata) | set(fs_mapping)
 
     by_fs: dict[str, list[Metric]] = {}
@@ -140,3 +166,4 @@ def parse_extension_zip(zip_bytes: bytes, ext_display_name: str) -> Optional[Ext
         return None
     info = parse_extension_yaml(text, ext_display_name)
     return info if info.feature_sets else None
+

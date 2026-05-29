@@ -6,9 +6,12 @@ from dynatrace_extension_alert_config.extension_yaml import (
     parse_extension_zip,
 )
 
-# A simplified extension.yaml exercising: top-level metric metadata, feature
-# sets on groups (inherited by metrics), per-metric override, and a metric with
-# no feature set (-> default).
+# A simplified extension.yaml modeled on a real Python extension (Meraki).
+# It mixes:
+#   - the canonical top-level metrics: block (real keys + metadata)
+#   - a Python-style top-level featureSets: block (assigns metrics to sets)
+#   - lots of NON-metric `key` fields (dimensions, topology, screens) that must
+#     NOT be treated as metrics.
 SAMPLE_YAML = """
 name: custom:com.dynatrace.extension.meraki
 version: 2.3.1
@@ -17,6 +20,10 @@ metrics:
     metadata:
       displayName: Meraki Appliance CPU Usage
       description: CPU Usage collected for the top MX devices
+      unit: Percent
+      dimensions:
+        - key: device.serial
+          displayName: Device Serial
   - key: meraki.device.memory_used
     metadata:
       displayName: Meraki Device Memory Used
@@ -27,31 +34,51 @@ metrics:
       description: Was Dynatrace able to poll the Meraki API
   - key: com.dynatrace.extension.network_device.sysuptime
     metadata: {}
+featureSets:
+  - featureSet: device-cpu
+    metrics:
+      - key: meraki.device.cpu_usage
+  - featureSet: device-memory
+    metrics:
+      - key: meraki.device.memory_used
+  - featureSet: self-monitoring
+    metrics:
+      - key: meraki.api.connectivity
 python:
   runtime:
     module: meraki_extension
   activation: {}
-snmp:
-  group:
-    - featureSet: device-cpu
-      subgroups:
-        - subgroup: cpu
-          metrics:
-            - key: meraki.device.cpu_usage
-              value: oid:1.3.6.1
-    - featureSet: device-memory
-      subgroups:
-        - subgroup: mem
-          metrics:
-            - key: meraki.device.memory_used
-              value: oid:1.3.6.2
-    - featureSet: self-monitoring
-      subgroups:
-        - subgroup: api
-          metrics:
-            - key: meraki.api.connectivity
-              value: oid:1.3.6.3
+topology:
+  types:
+    - name: meraki:device
+      rules:
+        - attributes:
+            - key: device.name
+              displayName: Device Name
+            - key: device.serial
+        - sources:
+            - sourceType: Metrics
+              condition: $eq(dt.entity.type,meraki:device)
+screens:
+  - entityType: meraki:device
+    chartsCards:
+      - key: cpu_charts
+      - key: memory_charts
+vars:
+  - key: devType
+  - key: org_id
 """
+
+
+def test_non_metric_keys_excluded():
+    """Dimensions, topology attributes, chart keys, and vars must NOT appear."""
+    info = parse_extension_yaml(SAMPLE_YAML, ext_display_name="Meraki")
+    keys = {m.key for fs in info.feature_sets for m in fs.metrics}
+    for junk in [
+        "device.serial", "device.name", "devType", "org_id",
+        "cpu_charts", "memory_charts", "meraki:device",
+    ]:
+        assert junk not in keys, f"non-metric key leaked in: {junk}"
 
 
 def test_parse_yaml_feature_sets():
