@@ -88,18 +88,28 @@ def build_payload(choice: DetectorChoice, extension_name: str) -> dict:
             "source": SOURCE,
             "analyzer": {
                 "name": analyzer_name,
-                "input": {"analyzer_input_field": _analyzer_input(choice, query)},
+                # `input` is a set of {key, value} fields (not wrapped).
+                "input": _analyzer_input(choice, query),
             },
-            # builtin:davis.anomaly-detectors event template — note this schema
-            # does NOT use the metric-events `eventType` field.
+            # Required by the schema; queryOffset shifts the sliding window.
+            "executionSettings": {"queryOffset": 0},
+            # The event template is a set of event.* property key/value pairs.
             "eventTemplate": {
-                "title": build_event_title(extension_name, metric_name, choice.split_dimensions),
-                "description": (
-                    f"The metric {metric.key} is {{alert_condition}} "
-                    f"the threshold of {{threshold}}."
-                ),
-                "davisMerge": True,
-                "metadata": [],
+                "properties": [
+                    {
+                        "key": "event.name",
+                        "value": build_event_title(
+                            extension_name, metric_name, choice.split_dimensions
+                        ),
+                    },
+                    {
+                        "key": "event.description",
+                        "value": (
+                            f"The metric {metric.key} is {{alert_condition}} "
+                            f"the threshold of {{threshold}}."
+                        ),
+                    },
+                ]
             },
         },
     }

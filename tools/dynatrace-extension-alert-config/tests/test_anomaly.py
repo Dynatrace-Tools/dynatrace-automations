@@ -22,8 +22,13 @@ def sample_metric():
 
 
 def _input_map(payload):
-    fields = payload["value"]["analyzer"]["input"]["analyzer_input_field"]
+    fields = payload["value"]["analyzer"]["input"]
     return {f["key"]: f["value"] for f in fields}
+
+
+def _event_props(payload):
+    props = payload["value"]["eventTemplate"]["properties"]
+    return {p["key"]: p["value"] for p in props}
 
 
 # ── DQL query builder ───────────────────────────────────────────────────────
@@ -134,19 +139,33 @@ def test_payload_query_uses_split_dims(sample_metric):
                             direction="ABOVE", split_dimensions=["device.name"])
     p = build_payload(choice, "Meraki")
     assert "by: { device.name }" in _input_map(p)["query"]
-    assert p["value"]["eventTemplate"]["title"] == (
+    assert _event_props(p)["event.name"] == (
         "Meraki - Meraki Appliance CPU Usage on {dims:device.name} "
         "is {alert_condition} the threshold of {threshold}"
     )
 
 
-def test_event_template_fields(sample_metric):
+def test_event_template_uses_properties(sample_metric):
     choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE")
     et = build_payload(choice, "Meraki")["value"]["eventTemplate"]
-    # davis.anomaly-detectors event template has no metric-events `eventType`
-    assert "eventType" not in et
-    assert et["davisMerge"] is True
-    assert et["metadata"] == []
+    # davis.anomaly-detectors uses a properties set, not title/description/eventType
+    assert "title" not in et
+    assert "properties" in et
+    props = _event_props(build_payload(choice, "Meraki"))
+    assert "event.name" in props
+    assert "event.description" in props
+
+
+def test_analyzer_input_is_a_list(sample_metric):
+    choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE")
+    p = build_payload(choice, "Meraki")
+    assert isinstance(p["value"]["analyzer"]["input"], list)
+
+
+def test_execution_settings_present(sample_metric):
+    choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE")
+    p = build_payload(choice, "Meraki")
+    assert p["value"]["executionSettings"] is not None
 
 
 def test_build_all_payloads(sample_metric):

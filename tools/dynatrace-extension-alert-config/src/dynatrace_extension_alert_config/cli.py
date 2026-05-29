@@ -63,6 +63,12 @@ def _parse_args() -> argparse.Namespace:
             "Only add scopes your OAuth client was actually granted."
         ),
     )
+    parser.add_argument(
+        "--dump-schema",
+        action="store_true",
+        help="Print the live builtin:davis.anomaly-detectors schema JSON and exit "
+             "(useful for verifying the exact payload structure).",
+    )
     return parser.parse_args()
 
 
@@ -111,11 +117,15 @@ def main() -> None:
 
     # ── 3. Connectivity check ───────────────────────────────────────────────
     try:
-        client.get_schema("builtin:davis.anomaly-detectors")
+        schema = client.get_schema("builtin:davis.anomaly-detectors")
         console.print("[green]Connected to Dynatrace environment.[/green]")
     except Exception as exc:
         console.print(f"[red]Cannot reach environment API:[/red] {exc}")
         sys.exit(1)
+
+    if args.dump_schema:
+        console.print_json(json.dumps(schema))
+        sys.exit(0)
 
     # ── 4. Resolve extension ────────────────────────────────────────────────
     try:
