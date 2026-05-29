@@ -8,7 +8,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .anomaly import build_all_payloads
-from .auth import AuthError, get_bearer_token
+from .auth import AuthError
 from .client import DynatraceClient
 from .config import get_or_prompt_credentials
 from .extensions import ExtensionNotFoundError, resolve_extension
@@ -58,7 +58,8 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Space-separated OAuth scopes to request, overriding the default "
-            "(settings:schemas:read settings:objects:read settings:objects:write). "
+            "(settings:schemas:read settings:objects:read settings:objects:write "
+            "environment-api:extensions:read). "
             "Only add scopes your OAuth client was actually granted."
         ),
     )
@@ -89,14 +90,22 @@ def main() -> None:
     # ── 2. Authenticate ────────────────────────────────────────────────────
     console.print("Authenticating with Dynatrace…")
     try:
-        from .auth import REQUIRED_SCOPES
-        token = get_bearer_token(creds, scopes=args.scopes or REQUIRED_SCOPES)
+        from .auth import REQUIRED_SCOPES, get_token_with_fallback
+        token, has_ext_scope = get_token_with_fallback(creds, scopes=args.scopes or REQUIRED_SCOPES)
     except AuthError as exc:
         console.print(f"[red]Authentication failed:[/red] {exc}")
         sys.exit(1)
     except Exception as exc:
         console.print(f"[red]Unexpected auth error:[/red] {exc}")
         sys.exit(1)
+
+    if not has_ext_scope:
+        console.print(
+            "[yellow]Note: token was issued without the extensions read scope "
+            "(environment-api:extensions:read). Extension discovery via the "
+            "environment API will likely fail. Grant that scope to your OAuth "
+            "client for full functionality.[/yellow]"
+        )
 
     client = DynatraceClient(env_url=creds["environmentUrl"], token=token)
 

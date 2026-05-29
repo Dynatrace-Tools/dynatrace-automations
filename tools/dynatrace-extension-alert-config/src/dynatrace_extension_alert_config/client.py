@@ -96,3 +96,14 @@ class DynatraceClient:
 
     def get_extension_environment_config(self, ext_name: str) -> dict:
         return self._get(f"/api/v2/extensions/{ext_name}/environmentConfiguration")
+
+    def download_extension(self, ext_name: str, version: str) -> bytes:
+        """Download the raw extension .zip (contains extension.yaml)."""
+        resp = self._session.get(
+            f"{self._base}/api/v2/extensions/{ext_name}/{version}",
+            headers={"Accept": "application/octet-stream"},
+            timeout=60,
+        )
+        if not resp.ok:
+            raise _extract_error(resp)
+        return resp.content

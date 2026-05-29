@@ -36,13 +36,16 @@ Environment URL:  https://<env-id>.live.dynatrace.com
 
 The OAuth client needs these scopes (assign them when creating the client under *Account Management → Identity & access management → OAuth clients*):
 
-- `settings:schemas:read`
-- `settings:objects:read`
-- `settings:objects:write`
+- `settings:schemas:read` — read the metric-events schema
+- `settings:objects:read` — read existing settings objects
+- `settings:objects:write` — create the anomaly detectors
+- `environment-api:extensions:read` — read installed extensions and download `extension.yaml`
 
-> **400 on token request?** Dynatrace SSO rejects the **entire** token request with `400` if *any* requested scope is invalid or was not granted to the client. Request only scopes your client actually has. Use `--scopes "..."` to override the default set if needed.
+> **400 on token request?** Dynatrace SSO rejects the **entire** token request with `400` if *any* requested scope is invalid or was not granted to the client. The tool degrades gracefully: if the full set is rejected it retries with the three `settings:*` scopes only (and warns that extension discovery won't work). Use `--scopes "..."` to override the requested set.
 
-Extension discovery via the environment API needs additional scopes that vary by tenant; if those aren't granted, the tool automatically falls back to scraping the Dynatrace docs page for the extension, so detector creation still works with just the three settings scopes above.
+> **Note:** `/api/v2/extensions` is the *classic* Environment API, so it uses the `environment-api:extensions:read` scope — **not** the platform `extensions:definitions:read` scope.
+
+The metric keys and their feature-set grouping are read from the extension's `extension.yaml`, which the tool downloads from your environment. (Scraping the public docs site is not viable — `docs.dynatrace.com` returns HTTP 403 to automated requests.)
 
 ## Usage
 

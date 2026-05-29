@@ -4,6 +4,7 @@ from typing import Optional
 
 from .client import DynatraceApiError, DynatraceClient
 from .docs_scraper import scrape_extension
+from .extension_yaml import parse_extension_zip
 from .models import ExtensionInfo, FeatureSet, Metric
 
 
@@ -111,6 +112,21 @@ def resolve_extension(name: str, client: DynatraceClient) -> ExtensionInfo:
                     f"[green]Found extension[/green] [bold]{matched}[/bold] "
                     f"version [bold]{version}[/bold] (via environment API)"
                 )
+                # The metric-key -> feature-set mapping lives in extension.yaml,
+                # which we get by downloading the extension package.
+                try:
+                    zip_bytes = client.download_extension(matched, version)
+                    info = parse_extension_zip(zip_bytes, ext_display_name=name)
+                    if info:
+                        info.version = version
+                        return info
+                except DynatraceApiError:
+                    raise
+                except Exception as exc:
+                    console.print(f"[yellow]Could not parse extension.yaml:[/yellow] {exc}")
+
+                # Last resort within the env API: the JSON details (feature-set
+                # names only — no metric keys, but better than nothing).
                 schema_data = client.get_extension_schema(matched, version)
                 info = _parse_extension_yaml(schema_data, ext_display_name=name)
                 if info.feature_sets:
