@@ -104,8 +104,10 @@ def main() -> None:
     # ── 2. Authenticate ────────────────────────────────────────────────────
     console.print("Authenticating with Dynatrace…")
     try:
-        from .auth import REQUIRED_SCOPES, get_token_with_fallback
-        token, has_ext_scope = get_token_with_fallback(creds, scopes=args.scopes or REQUIRED_SCOPES)
+        from .auth import REQUIRED_SCOPES, get_bearer_token, get_token_with_fallback
+        _, has_ext_scope, effective_scopes = get_token_with_fallback(
+            creds, scopes=args.scopes or REQUIRED_SCOPES
+        )
     except AuthError as exc:
         console.print(f"[red]Authentication failed:[/red] {exc}")
         sys.exit(1)
@@ -121,7 +123,12 @@ def main() -> None:
             "client for full functionality.[/yellow]"
         )
 
-    client = DynatraceClient(env_url=creds["environmentUrl"], token=token)
+    # Provide a refreshing token: the interactive flow can outlast a token's
+    # 5-minute lifetime, so the client fetches a fresh (cached) token per request.
+    def token_provider() -> str:
+        return get_bearer_token(creds, effective_scopes)
+
+    client = DynatraceClient(env_url=creds["environmentUrl"], token_provider=token_provider)
 
     # ── 3. Connectivity check ───────────────────────────────────────────────
     try:

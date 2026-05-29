@@ -66,23 +66,41 @@ def _extract_error(resp: requests.Response) -> DynatraceApiError:
 
 
 class DynatraceClient:
-    def __init__(self, env_url: str, token: str) -> None:
+    def __init__(self, env_url: str, token_provider) -> None:
+        """``token_provider`` is a no-arg callable returning a valid bearer
+        token. It is invoked per request so a token that expires during a long
+        interactive session is transparently refreshed (the auth layer caches
+        and re-issues as needed). A plain token string is also accepted.
+        """
         self._base = env_url.rstrip("/")
+        if callable(token_provider):
+            self._token_provider = token_provider
+        else:
+            self._token_provider = lambda: token_provider
         self._session = requests.Session()
         self._session.headers.update({
-            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         })
 
+    def _auth_header(self, extra: Optional[dict] = None) -> dict:
+        headers = {"Authorization": f"Bearer {self._token_provider()}"}
+        if extra:
+            headers.update(extra)
+        return headers
+
     def _get(self, path: str, params: Optional[dict] = None) -> Any:
-        resp = self._session.get(f"{self._base}{path}", params=params, timeout=30)
+        resp = self._session.get(
+            f"{self._base}{path}", params=params, headers=self._auth_header(), timeout=30
+        )
         if not resp.ok:
             raise _extract_error(resp)
         return resp.json()
 
     def _post(self, path: str, json_body: Any) -> Any:
-        resp = self._session.post(f"{self._base}{path}", json=json_body, timeout=30)
+        resp = self._session.post(
+            f"{self._base}{path}", json=json_body, headers=self._auth_header(), timeout=30
+        )
         if not resp.ok:
             raise _extract_error(resp)
         return resp.json()
@@ -144,7 +162,7 @@ class DynatraceClient:
         """Download the raw extension .zip (contains extension.yaml)."""
         resp = self._session.get(
             f"{self._base}/api/v2/extensions/{ext_name}/{version}",
-            headers={"Accept": "application/octet-stream"},
+            headers=self._auth_header({"Accept": "application/octet-stream"}),
             timeout=60,
         )
         if not resp.ok:

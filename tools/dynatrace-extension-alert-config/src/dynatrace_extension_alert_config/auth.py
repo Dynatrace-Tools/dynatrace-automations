@@ -78,22 +78,23 @@ def get_bearer_token(creds: dict, scopes: str = REQUIRED_SCOPES) -> str:
     return token
 
 
-def get_token_with_fallback(creds: dict, scopes: str = REQUIRED_SCOPES) -> tuple[str, bool]:
-    """Return (token, has_extension_scope).
+def get_token_with_fallback(creds: dict, scopes: str = REQUIRED_SCOPES) -> tuple[str, bool, str]:
+    """Return (token, has_extension_scope, effective_scopes).
 
     Tries the full scope set first. If Dynatrace SSO rejects it with 400 (a
     requested scope is invalid or ungranted), retries with the Settings scopes
     only so detector creation still works — flagging that extension discovery
-    via the environment API is unavailable.
+    via the environment API is unavailable. ``effective_scopes`` is the scope
+    string that actually worked, so callers can refresh the token later.
     """
     try:
         token = get_bearer_token(creds, scopes)
-        return token, (EXTENSION_SCOPES in scopes)
+        return token, (EXTENSION_SCOPES in scopes), scopes
     except AuthError:
         if scopes == SETTINGS_SCOPES:
             raise
         token = get_bearer_token(creds, SETTINGS_SCOPES)
-        return token, False
+        return token, False, SETTINGS_SCOPES
 
 
 class AuthError(Exception):
