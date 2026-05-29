@@ -52,6 +52,16 @@ def _parse_args() -> argparse.Namespace:
             "stored environmentUrl for this run."
         ),
     )
+    parser.add_argument(
+        "--scopes",
+        metavar="SCOPES",
+        default=None,
+        help=(
+            "Space-separated OAuth scopes to request, overriding the default "
+            "(settings:schemas:read settings:objects:read settings:objects:write). "
+            "Only add scopes your OAuth client was actually granted."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -79,7 +89,8 @@ def main() -> None:
     # ── 2. Authenticate ────────────────────────────────────────────────────
     console.print("Authenticating with Dynatrace…")
     try:
-        token = get_bearer_token(creds)
+        from .auth import REQUIRED_SCOPES
+        token = get_bearer_token(creds, scopes=args.scopes or REQUIRED_SCOPES)
     except AuthError as exc:
         console.print(f"[red]Authentication failed:[/red] {exc}")
         sys.exit(1)

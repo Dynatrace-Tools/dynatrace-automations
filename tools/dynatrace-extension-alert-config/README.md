@@ -34,7 +34,15 @@ Environment URL:  https://<env-id>.live.dynatrace.com
 - **Resource** — your account URN, e.g. `urn:dtaccount:12345678-...`
 - **Environment URL** — your SaaS environment base URL
 
-The OAuth client needs these scopes: `settings:objects:read`, `settings:objects:write`, `settings:schemas:read`, `extensions:read`, `extensions.environment:read`.
+The OAuth client needs these scopes (assign them when creating the client under *Account Management → Identity & access management → OAuth clients*):
+
+- `settings:schemas:read`
+- `settings:objects:read`
+- `settings:objects:write`
+
+> **400 on token request?** Dynatrace SSO rejects the **entire** token request with `400` if *any* requested scope is invalid or was not granted to the client. Request only scopes your client actually has. Use `--scopes "..."` to override the default set if needed.
+
+Extension discovery via the environment API needs additional scopes that vary by tenant; if those aren't granted, the tool automatically falls back to scraping the Dynatrace docs page for the extension, so detector creation still works with just the three settings scopes above.
 
 ## Usage
 
@@ -65,6 +73,7 @@ dynatrace-extension-alert-config --name meraki --reconfigure
 |---|---|
 | `--name` | Extension display name — fuzzy-matched, casing and the word "extension" are ignored |
 | `--env-id` | Dynatrace environment ID (e.g. `abc12345`). Constructs `https://<env-id>.live.dynatrace.com` and overrides the stored `environmentUrl` for this run only. |
+| `--scopes` | Override the OAuth scopes requested (space-separated). Defaults to the three `settings:*` scopes. |
 | `--reconfigure` | Re-enter and re-save OAuth credentials |
 | `--dry-run` | Print JSON payloads, no API calls made |
 | `--yes` | Non-interactive: create Auto-Adaptive / Above detectors for every metric |

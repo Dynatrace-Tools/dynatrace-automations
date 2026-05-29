@@ -5,19 +5,23 @@ from typing import Optional
 import requests
 
 TOKEN_URL = "https://sso.dynatrace.com/sso/oauth2/token"
+
+# Only the validated Settings 2.0 scopes are requested by default. These are
+# sufficient to read the metric-events schema and create detectors. Requesting
+# a scope the OAuth client was not granted makes Dynatrace SSO reject the WHOLE
+# token request with HTTP 400, so we keep this list minimal and let callers add
+# more via --scopes if their client has them.
 REQUIRED_SCOPES = (
-    "settings:objects:read "
-    "settings:objects:write "
     "settings:schemas:read "
-    "extensions:read "
-    "extensions.environment:read"
+    "settings:objects:read "
+    "settings:objects:write"
 )
 
 _token_cache: dict[str, tuple[str, float]] = {}
 
 
 def get_bearer_token(creds: dict, scopes: str = REQUIRED_SCOPES) -> str:
-    cache_key = creds["clientId"]
+    cache_key = f"{creds['clientId']}::{scopes}"
     if cache_key in _token_cache:
         token, expires_at = _token_cache[cache_key]
         if time.time() < expires_at - 30:
@@ -25,6 +29,7 @@ def get_bearer_token(creds: dict, scopes: str = REQUIRED_SCOPES) -> str:
 
     resp = requests.post(
         TOKEN_URL,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
         data={
             "grant_type": "client_credentials",
             "client_id": creds["clientId"],
@@ -36,8 +41,21 @@ def get_bearer_token(creds: dict, scopes: str = REQUIRED_SCOPES) -> str:
     )
 
     if resp.status_code == 400:
-        detail = resp.json().get("error_description", resp.text)
-        raise AuthError(f"OAuth 400 Bad Request: {detail}")
+        try:
+            body = resp.json()
+            detail = body.get("error_description") or body.get("error") or resp.text
+        except ValueError:
+            detail = resp.text
+        raise AuthError(
+            f"OAuth 400 Bad Request: {detail}\n"
+            f"Requested scopes: {scopes}\n"
+            "A 400 here usually means one of the requested scopes is invalid or "
+            "was not granted to this OAuth client. Verify in Dynatrace under "
+            "Account Management → Identity & access management → OAuth clients that "
+            "the client has: settings:schemas:read, settings:objects:read, "
+            "settings:objects:write. Also confirm the 'resource' is your account "
+            "URN (urn:dtaccount:<uuid>)."
+        )
     if resp.status_code == 401:
         raise AuthError("OAuth 401 Unauthorized — check your Client ID and Client Secret.")
     resp.raise_for_status()
