@@ -46,11 +46,14 @@ def build_payload(choice: DetectorChoice, extension_name: str) -> dict:
 
 
 def _build_model_properties(choice: DetectorChoice) -> dict:
+    # Field names per the builtin:anomaly-detection.metric-events schema:
+    # samples (sliding evaluation window), violatingSamples, dealertingSamples,
+    # alertOnNoData, alertCondition.
     base = {
         "alertCondition": choice.direction,
-        "alertingOnMissingData": False,
+        "alertOnNoData": False,
         "violatingSamples": 3,
-        "slidingWindow": 5,
+        "samples": 5,
         "dealertingSamples": 5,
     }
 
@@ -72,7 +75,6 @@ def _build_model_properties(choice: DetectorChoice) -> dict:
         return {
             "type": "STATIC_THRESHOLD",
             "threshold": choice.threshold,
-            "unit": "NONE",
             **base,
         }
     else:

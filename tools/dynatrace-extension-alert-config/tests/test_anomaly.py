@@ -25,8 +25,9 @@ def test_auto_adaptive_payload(sample_metric):
     assert mp["alertCondition"] == "ABOVE"
     assert "numberOfSignalFluctuations" in mp
     assert mp["violatingSamples"] == 3
-    assert mp["slidingWindow"] == 5
+    assert mp["samples"] == 5
     assert mp["dealertingSamples"] == 5
+    assert mp["alertOnNoData"] is False
 
 
 def test_seasonal_payload(sample_metric):
@@ -43,8 +44,9 @@ def test_static_threshold_payload(sample_metric):
     mp = payload["value"]["modelProperties"]
     assert mp["type"] == "STATIC_THRESHOLD"
     assert mp["threshold"] == 80.0
-    assert mp["unit"] == "NONE"
+    assert "unit" not in mp
     assert mp["alertCondition"] == "ABOVE"
+    assert mp["samples"] == 5
 
 
 def test_static_threshold_requires_value(sample_metric):

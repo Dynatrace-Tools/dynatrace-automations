@@ -161,13 +161,12 @@ def main() -> None:
 
     for choice, payload in zip(choices, payloads):
         try:
-            result = client.create_settings_objects([payload])
-            obj_id = result[0].get("objectId", "—") if result else "—"
+            obj_id = client.create_settings_object(payload)
             results_table.add_row(
                 choice.metric.key,
                 choice.model,
                 "[green]Created[/green]",
-                obj_id,
+                obj_id or "—",
             )
         except Exception as exc:
             results_table.add_row(
