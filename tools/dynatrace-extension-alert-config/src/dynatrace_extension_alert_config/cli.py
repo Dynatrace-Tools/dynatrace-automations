@@ -59,7 +59,7 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Space-separated OAuth scopes to request, overriding the default "
             "(settings:schemas:read settings:objects:read settings:objects:write "
-            "environment-api:extensions:read). "
+            "environment-api:extensions:read storage:metrics:read). "
             "Only add scopes your OAuth client was actually granted."
         ),
     )
@@ -111,7 +111,7 @@ def main() -> None:
 
     # ── 3. Connectivity check ───────────────────────────────────────────────
     try:
-        client.get_schema("builtin:anomaly-detection.metric-events")
+        client.get_schema("builtin:davis.anomaly-detectors")
         console.print("[green]Connected to Dynatrace environment.[/green]")
     except Exception as exc:
         console.print(f"[red]Cannot reach environment API:[/red] {exc}")

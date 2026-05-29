@@ -9,6 +9,7 @@ class Metric:
     name: str
     description: str = ""
     feature_set: str = "default"
+    dimensions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -33,3 +34,4 @@ class DetectorChoice:
     model: str          # AUTO_ADAPTIVE_BASELINE | SEASONAL_BASELINE | STATIC_THRESHOLD
     direction: str      # ABOVE | BELOW
     threshold: Optional[float] = None
+    split_dimensions: list[str] = field(default_factory=list)

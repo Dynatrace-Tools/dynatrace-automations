@@ -1,70 +1,150 @@
 import pytest
 
-from dynatrace_extension_alert_config.anomaly import build_payload, build_all_payloads
+from dynatrace_extension_alert_config.anomaly import (
+    SCHEMA_ID,
+    build_all_payloads,
+    build_dql_query,
+    build_event_title,
+    build_payload,
+)
 from dynatrace_extension_alert_config.models import DetectorChoice, Metric
 
 
 @pytest.fixture
 def sample_metric():
-    return Metric(key="meraki.device.cpu_usage", name="Meraki Appliance CPU Usage", description="CPU Usage", feature_set="device-cpu")
+    return Metric(
+        key="meraki.device.cpu_usage",
+        name="Meraki Appliance CPU Usage",
+        description="CPU Usage",
+        feature_set="device-cpu",
+        dimensions=["device.name", "device.serial"],
+    )
 
 
-def test_auto_adaptive_payload(sample_metric):
+def _input_map(payload):
+    fields = payload["value"]["analyzer"]["input"]["analyzer_input_field"]
+    return {f["key"]: f["value"] for f in fields}
+
+
+# ── DQL query builder ───────────────────────────────────────────────────────
+
+def test_dql_no_split():
+    q = build_dql_query("meraki.device.cpu_usage", [])
+    assert q == (
+        "timeseries { avg(meraki.device.cpu_usage), "
+        "value.A = avg(meraki.device.cpu_usage, scalar: true) }, interval: 1m"
+    )
+
+
+def test_dql_single_split():
+    q = build_dql_query("meraki.device.cpu_usage", ["device.name"])
+    assert ", by: { device.name }" in q
+    assert q.endswith(", interval: 1m")
+
+
+def test_dql_multi_split():
+    q = build_dql_query("m.key", ["a", "b"])
+    assert ", by: { a, b }" in q
+
+
+# ── Event title ─────────────────────────────────────────────────────────────
+
+def test_event_title_with_split():
+    t = build_event_title("Meraki", "CPU Usage", ["device.name"])
+    assert t == "Meraki - CPU Usage on {dims:device.name} is {alert_condition} the threshold of {threshold}"
+
+
+def test_event_title_multi_split():
+    t = build_event_title("Meraki", "CPU", ["a", "b"])
+    assert "on {dims:a}, {dims:b} is" in t
+
+
+def test_event_title_no_split_omits_on_clause():
+    t = build_event_title("Meraki", "CPU Usage", [])
+    assert t == "Meraki - CPU Usage is {alert_condition} the threshold of {threshold}"
+    assert " on " not in t
+
+
+# ── Payload ─────────────────────────────────────────────────────────────────
+
+def test_payload_schema_and_title(sample_metric):
+    choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE",
+                            direction="ABOVE", split_dimensions=["device.name"])
+    p = build_payload(choice, "Meraki")
+    assert p["schemaId"] == SCHEMA_ID
+    assert p["scope"] == "environment"
+    assert p["value"]["title"] == "Meraki - Meraki Appliance CPU Usage"
+    assert p["value"]["enabled"] is True
+    assert p["value"]["source"] == "dynatrace-extension-alert-config"
+
+
+def test_payload_analyzer_name_auto(sample_metric):
     choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE")
-    payload = build_payload(choice, extension_name="Meraki")
-    assert payload["schemaId"] == "builtin:anomaly-detection.metric-events"
-    assert payload["scope"] == "environment"
-    v = payload["value"]
-    assert v["enabled"] is True
-    assert v["queryDefinition"]["metricKey"] == "meraki.device.cpu_usage"
-    assert v["queryDefinition"]["type"] == "METRIC_KEY"
-    # entityFilter must NOT be present — detector applies across all entities
-    assert "entityFilter" not in v["queryDefinition"]
-    mp = v["modelProperties"]
-    assert mp["type"] == "AUTO_ADAPTIVE_BASELINE"
-    assert mp["alertCondition"] == "ABOVE"
-    assert "numberOfSignalFluctuations" in mp
-    assert mp["violatingSamples"] == 3
-    assert mp["samples"] == 5
-    assert mp["dealertingSamples"] == 5
-    assert mp["alertOnNoData"] is False
+    p = build_payload(choice, "Meraki")
+    assert p["value"]["analyzer"]["name"].endswith("AutoAdaptiveAnomalyDetectionAnalyzer")
 
 
-def test_seasonal_payload(sample_metric):
+def test_payload_analyzer_name_seasonal(sample_metric):
     choice = DetectorChoice(metric=sample_metric, model="SEASONAL_BASELINE", direction="BELOW")
-    payload = build_payload(choice, extension_name="Meraki")
-    mp = payload["value"]["modelProperties"]
-    assert mp["type"] == "SEASONAL_BASELINE"
-    assert mp["alertCondition"] == "BELOW"
+    p = build_payload(choice, "Meraki")
+    assert p["value"]["analyzer"]["name"].endswith("SeasonalBaselineAnomalyDetectionAnalyzer")
 
 
-def test_static_threshold_payload(sample_metric):
-    choice = DetectorChoice(metric=sample_metric, model="STATIC_THRESHOLD", direction="ABOVE", threshold=80.0)
-    payload = build_payload(choice, extension_name="Meraki")
-    mp = payload["value"]["modelProperties"]
-    assert mp["type"] == "STATIC_THRESHOLD"
-    assert mp["threshold"] == 80.0
-    assert "unit" not in mp
-    assert mp["alertCondition"] == "ABOVE"
-    assert mp["samples"] == 5
+def test_payload_static_includes_threshold(sample_metric):
+    choice = DetectorChoice(metric=sample_metric, model="STATIC_THRESHOLD",
+                            direction="ABOVE", threshold=80.0)
+    p = build_payload(choice, "Meraki")
+    assert p["value"]["analyzer"]["name"].endswith("StaticThresholdAnomalyDetectionAnalyzer")
+    im = _input_map(p)
+    assert im["threshold"] == "80"          # integer rendered without .0
+    assert im["alertCondition"] == "ABOVE"
+    assert im["violatingSamples"] == "3"
+    assert im["slidingWindow"] == "5"
+    assert im["dealertingSamples"] == "5"
+    assert "interval: 1m" in im["query"]
 
 
-def test_static_threshold_requires_value(sample_metric):
+def test_payload_static_decimal_threshold(sample_metric):
+    choice = DetectorChoice(metric=sample_metric, model="STATIC_THRESHOLD",
+                            direction="BELOW", threshold=1.5)
+    p = build_payload(choice, "Meraki")
+    assert _input_map(p)["threshold"] == "1.5"
+
+
+def test_payload_baseline_has_no_threshold(sample_metric):
+    choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE")
+    p = build_payload(choice, "Meraki")
+    assert "threshold" not in _input_map(p)
+
+
+def test_payload_static_requires_threshold(sample_metric):
     choice = DetectorChoice(metric=sample_metric, model="STATIC_THRESHOLD", direction="ABOVE", threshold=None)
     with pytest.raises(ValueError, match="threshold"):
-        build_payload(choice, extension_name="Meraki")
+        build_payload(choice, "Meraki")
 
 
-def test_unknown_model_raises(sample_metric):
-    choice = DetectorChoice(metric=sample_metric, model="UNKNOWN_MODEL", direction="ABOVE")
+def test_payload_unknown_model(sample_metric):
+    choice = DetectorChoice(metric=sample_metric, model="NOPE", direction="ABOVE")
     with pytest.raises(ValueError, match="Unknown model"):
-        build_payload(choice, extension_name="Meraki")
+        build_payload(choice, "Meraki")
 
 
-def test_summary_contains_metric_key(sample_metric):
+def test_payload_query_uses_split_dims(sample_metric):
+    choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE",
+                            direction="ABOVE", split_dimensions=["device.name"])
+    p = build_payload(choice, "Meraki")
+    assert "by: { device.name }" in _input_map(p)["query"]
+    assert p["value"]["eventTemplate"]["title"] == (
+        "Meraki - Meraki Appliance CPU Usage on {dims:device.name} "
+        "is {alert_condition} the threshold of {threshold}"
+    )
+
+
+def test_event_template_fields(sample_metric):
     choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE")
-    payload = build_payload(choice, extension_name="Meraki")
-    assert "meraki.device.cpu_usage" in payload["value"]["summary"]
+    et = build_payload(choice, "Meraki")["value"]["eventTemplate"]
+    assert et["eventType"] == "CUSTOM_ALERT"
+    assert et["davisMerge"] is True
 
 
 def test_build_all_payloads(sample_metric):
@@ -72,31 +152,6 @@ def test_build_all_payloads(sample_metric):
         DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE"),
         DetectorChoice(metric=sample_metric, model="STATIC_THRESHOLD", direction="BELOW", threshold=50.0),
     ]
-    payloads = build_all_payloads(choices, extension_name="Meraki")
+    payloads = build_all_payloads(choices, "Meraki")
     assert len(payloads) == 2
-    assert payloads[0]["value"]["modelProperties"]["type"] == "AUTO_ADAPTIVE_BASELINE"
-    assert payloads[1]["value"]["modelProperties"]["type"] == "STATIC_THRESHOLD"
-
-
-def test_event_template_fields(sample_metric):
-    choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE")
-    payload = build_payload(choice, extension_name="Meraki")
-    et = payload["value"]["eventTemplate"]
-    assert et["eventType"] == "CUSTOM_ALERT"
-    assert et["davisMerge"] is True
-    # Title format: "<description> is {alert_condition} the threshold of {threshold}"
-    assert et["title"] == "CPU Usage is {alert_condition} the threshold of {threshold}"
-    assert "{alert_condition}" in et["description"]
-    assert "{threshold}" in et["description"]
-
-
-def test_title_falls_back_to_name_then_key():
-    from dynatrace_extension_alert_config.models import Metric
-    # No description -> use name
-    m1 = Metric(key="meraki.x", name="X Metric", description="")
-    p1 = build_payload(DetectorChoice(metric=m1, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE"), "Meraki")
-    assert p1["value"]["eventTemplate"]["title"].startswith("X Metric is ")
-    # No description and no name -> use key
-    m2 = Metric(key="meraki.y", name="", description="")
-    p2 = build_payload(DetectorChoice(metric=m2, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE"), "Meraki")
-    assert p2["value"]["eventTemplate"]["title"].startswith("meraki.y is ")
+    assert all(p["schemaId"] == SCHEMA_ID for p in payloads)

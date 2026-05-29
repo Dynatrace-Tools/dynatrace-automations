@@ -19,10 +19,14 @@ SETTINGS_SCOPES = (
 # "extensions:definitions:read" scope.
 EXTENSION_SCOPES = "environment-api:extensions:read"
 
+# builtin:davis.anomaly-detectors evaluates a DQL timeseries query, so creating
+# a detector requires read access to Grail metrics.
+DQL_SCOPES = "storage:metrics:read"
+
 # Requesting a scope the OAuth client was NOT granted makes Dynatrace SSO reject
 # the WHOLE token request with HTTP 400. get_bearer_token() degrades gracefully:
 # it tries the full set first, then falls back to settings-only.
-REQUIRED_SCOPES = f"{SETTINGS_SCOPES} {EXTENSION_SCOPES}"
+REQUIRED_SCOPES = f"{SETTINGS_SCOPES} {EXTENSION_SCOPES} {DQL_SCOPES}"
 
 _token_cache: dict[str, tuple[str, float]] = {}
 

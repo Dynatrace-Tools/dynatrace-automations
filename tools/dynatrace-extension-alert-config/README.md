@@ -1,15 +1,17 @@
 # dynatrace-extension-alert-config
 
-Create [Davis Anomaly Detection](https://docs.dynatrace.com/docs/discover-dynatrace/platform/davis-ai/anomaly-detection/metric-events) configurations for every metric in any Dynatrace extension — interactively, from the CLI.
+Create [Davis Anomaly Detection](https://docs.dynatrace.com/docs/discover-dynatrace/platform/davis-ai/anomaly-detection/anomaly-detection-app) configurations for every metric in any Dynatrace extension — interactively, from the CLI.
 
 ## What it does
 
 Given an extension name (e.g. `Meraki Extension`), the tool:
 
-1. Looks up the extension in your Dynatrace environment and discovers all its **feature sets** and **metric keys**
+1. Looks up the extension in your Dynatrace environment and discovers all its **feature sets**, **metric keys**, and each metric's **dimensions**
 2. Presents an interactive **checkbox list** of every metric
-3. For each selected metric, asks you to choose a **detection model** and **alert direction**
-4. Creates the corresponding `builtin:anomaly-detection.metric-events` settings objects via the Settings 2.0 API
+3. For each selected metric, asks you to choose a **detection model**, **alert direction**, and which **dimension(s) to split by**
+4. Creates the corresponding **`builtin:davis.anomaly-detectors`** settings objects (DQL-based Davis Anomaly Detection) via the Settings 2.0 API
+
+> **SaaS only** — the DQL-based Davis Anomaly Detection app is not available on Dynatrace Managed.
 
 ## Installation
 
@@ -36,10 +38,11 @@ Environment URL:  https://<env-id>.live.dynatrace.com
 
 The OAuth client needs these scopes (assign them when creating the client under *Account Management → Identity & access management → OAuth clients*):
 
-- `settings:schemas:read` — read the metric-events schema
+- `settings:schemas:read` — read the anomaly-detectors schema
 - `settings:objects:read` — read existing settings objects
 - `settings:objects:write` — create the anomaly detectors
 - `environment-api:extensions:read` — read installed extensions and download `extension.yaml`
+- `storage:metrics:read` — required because each detector evaluates a DQL `timeseries` query over metrics
 
 > **400 on token request?** Dynatrace SSO rejects the **entire** token request with `400` if *any* requested scope is invalid or was not granted to the client. The tool degrades gracefully: if the full set is rejected it retries with the three `settings:*` scopes only (and warns that extension discovery won't work). Use `--scopes "..."` to override the requested set.
 
@@ -118,34 +121,37 @@ Configuring meraki.device.cpu_usage:
 | **Seasonal Baseline** | Like Auto-Adaptive but accounts for time-of-day / day-of-week seasonality. |
 | **Static Threshold** | Alert when the metric crosses a fixed numeric value you provide. |
 
-For all models you choose **Above** or **Below** the threshold/baseline.
+For all models you choose **Above** or **Below** the threshold/baseline, then which metric **dimension(s) to split by** (or none).
 
 ## What gets created
 
-Each selected metric becomes one `builtin:anomaly-detection.metric-events` settings object:
+Each selected metric becomes one `builtin:davis.anomaly-detectors` settings object. The detector evaluates a DQL `timeseries` query (`interval: 1m` is mandatory), optionally split by the dimensions you chose:
 
 ```json
 {
-  "schemaId": "builtin:anomaly-detection.metric-events",
+  "schemaId": "builtin:davis.anomaly-detectors",
   "scope": "environment",
   "value": {
     "enabled": true,
-    "summary": "Meraki – meraki.device.cpu_usage anomaly detection",
-    "queryDefinition": {
-      "type": "METRIC_KEY",
-      "metricKey": "meraki.device.cpu_usage",
-      "aggregation": "AVG"
-    },
-    "modelProperties": {
-      "type": "AUTO_ADAPTIVE_BASELINE",
-      "alertCondition": "ABOVE",
-      "violatingSamples": 3,
-      "slidingWindow": 5,
-      "dealertingSamples": 5,
-      "numberOfSignalFluctuations": 1.0
+    "title": "Meraki - Meraki Appliance CPU Usage",
+    "description": "Auto-created for Meraki metric meraki.device.cpu_usage",
+    "source": "dynatrace-extension-alert-config",
+    "analyzer": {
+      "name": "dt.statistics.ui.anomaly_detection.StaticThresholdAnomalyDetectionAnalyzer",
+      "input": {
+        "analyzer_input_field": [
+          {"key": "query", "value": "timeseries { avg(meraki.device.cpu_usage), value.A = avg(meraki.device.cpu_usage, scalar: true) }, by: { device.name }, interval: 1m"},
+          {"key": "alertCondition", "value": "ABOVE"},
+          {"key": "alertOnMissingData", "value": "false"},
+          {"key": "violatingSamples", "value": "3"},
+          {"key": "slidingWindow", "value": "5"},
+          {"key": "dealertingSamples", "value": "5"},
+          {"key": "threshold", "value": "80"}
+        ]
+      }
     },
     "eventTemplate": {
-      "title": "CPU Usage collected for the top MX devices is {alert_condition} the threshold of {threshold}",
+      "title": "Meraki - Meraki Appliance CPU Usage on {dims:device.name} is {alert_condition} the threshold of {threshold}",
       "description": "The metric meraki.device.cpu_usage is {alert_condition} the threshold of {threshold}.",
       "eventType": "CUSTOM_ALERT",
       "davisMerge": true
@@ -154,25 +160,22 @@ Each selected metric becomes one `builtin:anomaly-detection.metric-events` setti
 }
 ```
 
-`{alert_condition}` and `{threshold}` are Dynatrace event-template placeholders resolved at event-fire time.
+- **Config name** = `value.title` → `<Extension> - <Metric Name>`
+- **Event title** = `<Extension> - <Metric Name> on {dims:<dim>} is {alert_condition} the threshold of {threshold}` (the ` on …` clause is dropped when no split dimension is chosen)
+- `{alert_condition}`, `{threshold}`, and `{dims:<dim>}` are Dynatrace event-template placeholders resolved at event-fire time
+- Baseline analyzers (auto-adaptive / seasonal) omit the `threshold` input
 
-Verify after the run:
-
-```
-Settings → Anomaly Detection → Metric events
-```
-
-or via API:
+Verify after the run in the **Davis Anomaly Detection** app, or via API:
 
 ```bash
-GET /api/v2/settings/objects?schemaIds=builtin:anomaly-detection.metric-events
+GET /api/v2/settings/objects?schemaIds=builtin:davis.anomaly-detectors
 ```
 
 ## How the extension is resolved
 
-**Primary — environment API**: The tool lists all installed extensions in your environment and fuzzy-matches your input against their names. It then fetches the active extension definition to read feature sets and metric keys.
+**Primary — environment API**: The tool lists all installed extensions in your environment and fuzzy-matches your input against their names. It then downloads the extension package and parses `extension.yaml` to read feature sets, metric keys, and each metric's dimensions (metadata + inherited group/subgroup dimensions).
 
-**Fallback — docs scraping**: If the extension isn't found in the environment (e.g. not yet installed), the tool scrapes the Dynatrace documentation page for that extension, parsing the *Feature sets* section and metric tables.
+**Fallback — docs scraping**: only a last resort; `docs.dynatrace.com` returns HTTP 403 to automated requests, so it is unreliable.
 
 ## Credentials file
 
@@ -192,4 +195,4 @@ The file is written with mode `0600` (owner read/write only). The token is fetch
 ## Notes
 
 - **SaaS only** — this tool uses the `sso.dynatrace.com` OAuth flow, which is not available on Dynatrace Managed.
-- Detection defaults: `AVG` aggregation, sliding window of 5 samples, 3 violating samples to raise, 5 to clear. These are sensible starting points; tune them in Settings → Metric events after creation if needed.
+- Detection defaults: `avg()` aggregation, sliding window of 5 samples, 3 violating samples to raise, 5 to clear. These are sensible starting points; tune them in the Davis Anomaly Detection app after creation if needed.

@@ -79,9 +79,22 @@ def _find_extension_yaml(zip_bytes: bytes) -> Optional[str]:
     return None
 
 
+def _dimension_keys(container: dict) -> list[str]:
+    """Extract dimension keys from a ``dimensions:`` list on a dict."""
+    keys: list[str] = []
+    for d in container.get("dimensions", []) or []:
+        if isinstance(d, dict):
+            k = d.get("key")
+            if isinstance(k, str) and k:
+                keys.append(k)
+        elif isinstance(d, str):
+            keys.append(d)
+    return keys
+
+
 def _collect_metric_metadata(doc: dict) -> dict[str, Metric]:
-    """Read the top-level ``metrics:`` list for the canonical metric keys and
-    their display name + description."""
+    """Read the top-level ``metrics:`` list for the canonical metric keys, their
+    display name + description, and any dimensions declared in metadata."""
     out: dict[str, Metric] = {}
     for m in doc.get("metrics", []) or []:
         if not isinstance(m, dict):
@@ -94,6 +107,7 @@ def _collect_metric_metadata(doc: dict) -> dict[str, Metric]:
             key=key,
             name=meta.get("displayName", "") or key,
             description=meta.get("description", "") or "",
+            dimensions=_dimension_keys(meta),
         )
     return out
 
@@ -105,17 +119,29 @@ def _assign(mapping: dict[str, str], key: str, feature_set: str) -> None:
         mapping[key] = feature_set
 
 
-def _walk_feature_sets(node, inherited_fs: str, mapping: dict[str, str]) -> None:
-    """Walk the document, assigning feature sets to metric keys.
+def _walk_feature_sets(
+    node,
+    inherited_fs: str,
+    inherited_dims: tuple[str, ...],
+    mapping: dict[str, str],
+    dim_mapping: dict[str, list[str]],
+) -> None:
+    """Walk the document, assigning feature sets and split dimensions to metrics.
 
     Keys are read ONLY from ``metrics:`` lists, never from arbitrary ``key``
     fields, so dimensions/topology/chart keys are never mistaken for metrics.
-    The nearest ``featureSet`` in scope (group/subgroup/feature-set entry) is
-    inherited; an entry's own ``featureSet`` overrides it.
+    The nearest ``featureSet`` in scope is inherited (an entry's own overrides);
+    ``dimensions:`` declared on enclosing group/subgroup dicts accumulate and are
+    inherited by the metrics they contain.
     """
     if isinstance(node, dict):
         fs = node.get("featureSet")
         current_fs = fs if isinstance(fs, str) and fs else inherited_fs
+
+        current_dims = inherited_dims
+        for d in _dimension_keys(node):
+            if d not in current_dims:
+                current_dims = current_dims + (d,)
 
         for k, v in node.items():
             if k == "metrics" and isinstance(v, list):
@@ -128,11 +154,22 @@ def _walk_feature_sets(node, inherited_fs: str, mapping: dict[str, str]) -> None
                     item_fs = item.get("featureSet")
                     assigned = item_fs if isinstance(item_fs, str) and item_fs else current_fs
                     _assign(mapping, key, assigned)
+                    # Inherited dims plus any declared on the metric entry itself.
+                    metric_dims = list(current_dims)
+                    for d in _dimension_keys(item):
+                        if d not in metric_dims:
+                            metric_dims.append(d)
+                    existing = dim_mapping.setdefault(key, [])
+                    for d in metric_dims:
+                        if d not in existing:
+                            existing.append(d)
+            elif k == "dimensions":
+                continue  # already folded into current_dims
             else:
-                _walk_feature_sets(v, current_fs, mapping)
+                _walk_feature_sets(v, current_fs, current_dims, mapping, dim_mapping)
     elif isinstance(node, list):
         for item in node:
-            _walk_feature_sets(item, inherited_fs, mapping)
+            _walk_feature_sets(item, inherited_fs, inherited_dims, mapping, dim_mapping)
 
 
 def parse_extension_yaml(text: str, ext_display_name: str) -> ExtensionInfo:
@@ -140,9 +177,10 @@ def parse_extension_yaml(text: str, ext_display_name: str) -> ExtensionInfo:
 
     metadata = _collect_metric_metadata(doc)
 
-    # metric key -> feature set, harvested only from metrics: lists.
+    # metric key -> feature set / dimensions, harvested only from metrics: lists.
     fs_mapping: dict[str, str] = {}
-    _walk_feature_sets(doc, DEFAULT_FEATURE_SET, fs_mapping)
+    dim_mapping: dict[str, list[str]] = {}
+    _walk_feature_sets(doc, DEFAULT_FEATURE_SET, (), fs_mapping, dim_mapping)
 
     # Authoritative metric set = top-level metrics block plus any key referenced
     # in a metrics: list. Both sources are real metrics; nothing else qualifies.
@@ -151,9 +189,14 @@ def parse_extension_yaml(text: str, ext_display_name: str) -> ExtensionInfo:
     by_fs: dict[str, list[Metric]] = {}
     for key in sorted(all_keys):
         metric = metadata.get(key) or Metric(key=key, name=key, description="")
-        fs_name = fs_mapping.get(key, DEFAULT_FEATURE_SET)
-        metric.feature_set = fs_name
-        by_fs.setdefault(fs_name, []).append(metric)
+        metric.feature_set = fs_mapping.get(key, DEFAULT_FEATURE_SET)
+        # Merge metadata dimensions with those inherited from groups/subgroups.
+        merged = list(metric.dimensions)
+        for d in dim_mapping.get(key, []):
+            if d not in merged:
+                merged.append(d)
+        metric.dimensions = merged
+        by_fs.setdefault(metric.feature_set, []).append(metric)
 
     feature_sets = [FeatureSet(name=name, metrics=ms) for name, ms in sorted(by_fs.items())]
     version = str(doc.get("version", "") or "")

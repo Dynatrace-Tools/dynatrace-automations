@@ -70,6 +70,44 @@ vars:
 """
 
 
+# SNMP-style document: dimensions declared at group/subgroup level, inherited
+# by the metrics nested under them.
+SNMP_YAML = """
+name: custom:com.dynatrace.extension.netdev
+version: 1.0.0
+metrics:
+  - key: net.if.bytes_in
+    metadata:
+      displayName: Bytes In
+snmp:
+  - group: interfaces
+    featureSet: interface-traffic
+    dimensions:
+      - key: device.name
+    subgroups:
+      - subgroup: ifTable
+        dimensions:
+          - key: interface
+        metrics:
+          - key: net.if.bytes_in
+            value: oid:1.3.6.1
+"""
+
+
+def test_metadata_dimensions_extracted():
+    info = parse_extension_yaml(SAMPLE_YAML, ext_display_name="Meraki")
+    cpu = next(m for fs in info.feature_sets for m in fs.metrics if m.key == "meraki.device.cpu_usage")
+    assert "device.serial" in cpu.dimensions
+
+
+def test_inherited_group_subgroup_dimensions():
+    info = parse_extension_yaml(SNMP_YAML, ext_display_name="NetDev")
+    m = next(mm for fs in info.feature_sets for mm in fs.metrics if mm.key == "net.if.bytes_in")
+    # device.name (group) + interface (subgroup), both inherited
+    assert m.dimensions == ["device.name", "interface"]
+    assert m.feature_set == "interface-traffic"
+
+
 def test_non_metric_keys_excluded():
     """Dimensions, topology attributes, chart keys, and vars must NOT appear."""
     info = parse_extension_yaml(SAMPLE_YAML, ext_display_name="Meraki")

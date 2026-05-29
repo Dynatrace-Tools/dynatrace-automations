@@ -26,9 +26,10 @@ def _display_extension_summary(info: ExtensionInfo) -> None:
     table.add_column("Feature Set", style="cyan")
     table.add_column("Metric Key", style="white")
     table.add_column("Metric Name", style="dim white")
+    table.add_column("Dimensions", style="dim white")
     for fs in info.feature_sets:
         for m in fs.metrics:
-            table.add_row(fs.name, m.key, m.name)
+            table.add_row(fs.name, m.key, m.name, ", ".join(m.dimensions) or "—")
     console.print(table)
 
 
@@ -57,10 +58,11 @@ def select_metrics(info: ExtensionInfo) -> list[Metric]:
 
 def configure_detector(metric: Metric) -> Optional[DetectorChoice]:
     """Interactively configure a single metric's detector settings."""
+    # questionary prompts are plain text — render emphasis via rich separately.
     console.rule(f"[bold cyan]{metric.key}[/bold cyan]")
 
     model = questionary.select(
-        f"Detection model for [bold]{metric.key}[/bold]:",
+        f"Detection model for {metric.key}:",
         choices=MODEL_CHOICES,
     ).ask()
     if model is None:
@@ -83,7 +85,24 @@ def configure_detector(metric: Metric) -> Optional[DetectorChoice]:
     if direction is None:
         return None
 
-    return DetectorChoice(metric=metric, model=model, direction=direction, threshold=threshold)
+    split_dimensions: list[str] = []
+    if metric.dimensions:
+        selected = questionary.checkbox(
+            "Split by which dimension(s)? (Space to toggle, Enter to confirm; "
+            "leave empty for no split)",
+            choices=[questionary.Choice(d, value=d) for d in metric.dimensions],
+        ).ask()
+        if selected is None:
+            return None
+        split_dimensions = selected
+
+    return DetectorChoice(
+        metric=metric,
+        model=model,
+        direction=direction,
+        threshold=threshold,
+        split_dimensions=split_dimensions,
+    )
 
 
 def _validate_number(value: str) -> bool | str:
