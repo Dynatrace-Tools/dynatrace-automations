@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from .client import DynatraceClient
+from .client import DynatraceApiError, DynatraceClient
 from .docs_scraper import scrape_extension
 from .models import ExtensionInfo, FeatureSet, Metric
 
@@ -115,6 +115,17 @@ def resolve_extension(name: str, client: DynatraceClient) -> ExtensionInfo:
                 info = _parse_extension_yaml(schema_data, ext_display_name=name)
                 if info.feature_sets:
                     return info
+    except DynatraceApiError as exc:
+        console.print(f"[yellow]Environment API lookup failed ({exc.status}):[/yellow] {exc.message}")
+        if exc.status == 403 and exc.required_scopes:
+            scopes = " ".join(exc.required_scopes)
+            console.print(
+                f"[yellow]The Extensions API requires scope(s): "
+                f"[bold]{', '.join(exc.required_scopes)}[/bold].[/yellow]\n"
+                f"Grant it to your OAuth client, then re-run with:\n"
+                f'  [cyan]--scopes "settings:schemas:read settings:objects:read '
+                f'settings:objects:write {scopes}"[/cyan]'
+            )
     except Exception as exc:
         console.print(f"[yellow]Environment API lookup failed:[/yellow] {exc}")
 
@@ -125,8 +136,12 @@ def resolve_extension(name: str, client: DynatraceClient) -> ExtensionInfo:
         return info
 
     raise ExtensionNotFoundError(
-        f"Could not resolve extension '{name}' from the environment API or the docs. "
-        "Check the extension name and ensure it is installed in your environment."
+        f"Could not resolve extension '{name}' from the environment API or the docs.\n"
+        "  • Environment API: ensure your OAuth client has an extensions read scope "
+        "(see the hint above) and that the extension is installed.\n"
+        "  • Docs fallback: docs.dynatrace.com blocks automated requests (HTTP 403), "
+        "so scraping is unreliable.\n"
+        "Tip: run with --scopes to add the required extension scope."
     )
 
 

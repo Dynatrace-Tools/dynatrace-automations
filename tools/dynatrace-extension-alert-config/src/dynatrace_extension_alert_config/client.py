@@ -1,7 +1,39 @@
 from __future__ import annotations
+import re
 from typing import Any, Optional
 
 import requests
+
+
+class DynatraceApiError(Exception):
+    """A Dynatrace API error that carries the server's message and any
+    required-scope hint parsed from the response body."""
+
+    def __init__(self, status: int, message: str, required_scopes: Optional[list[str]] = None):
+        self.status = status
+        self.message = message
+        self.required_scopes = required_scopes or []
+        super().__init__(message)
+
+
+def _extract_error(resp: requests.Response) -> DynatraceApiError:
+    """Build a DynatraceApiError from a failed response, pulling out the
+    'missing required scope. Use one of: ...' hint when present."""
+    body_text = resp.text
+    message = body_text
+    try:
+        err = resp.json().get("error", {})
+        message = err.get("message", body_text)
+    except ValueError:
+        pass
+
+    required: list[str] = []
+    # e.g. "Token is missing required scope. Use one of: [extensions.read, ...]"
+    m = re.search(r"required scope.*?:\s*\[?([^\]\n]+)\]?", message, re.IGNORECASE)
+    if m:
+        required = [s.strip() for s in re.split(r"[,\s]+", m.group(1)) if s.strip()]
+
+    return DynatraceApiError(resp.status_code, message, required)
 
 
 class DynatraceClient:
@@ -16,12 +48,14 @@ class DynatraceClient:
 
     def _get(self, path: str, params: Optional[dict] = None) -> Any:
         resp = self._session.get(f"{self._base}{path}", params=params, timeout=30)
-        resp.raise_for_status()
+        if not resp.ok:
+            raise _extract_error(resp)
         return resp.json()
 
     def _post(self, path: str, json_body: Any) -> Any:
         resp = self._session.post(f"{self._base}{path}", json=json_body, timeout=30)
-        resp.raise_for_status()
+        if not resp.ok:
+            raise _extract_error(resp)
         return resp.json()
 
     # ── Settings ──────────────────────────────────────────────────────────────
