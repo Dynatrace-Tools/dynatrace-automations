@@ -157,8 +157,9 @@ def main() -> None:
     results_table.add_column("Metric Key", style="cyan")
     results_table.add_column("Model", style="white")
     results_table.add_column("Status", style="white")
-    results_table.add_column("Object ID / Error", style="dim white")
+    results_table.add_column("Object ID", style="dim white")
 
+    failures: list[tuple[str, str]] = []
     for choice, payload in zip(choices, payloads):
         try:
             obj_id = client.create_settings_object(payload)
@@ -173,10 +174,16 @@ def main() -> None:
                 choice.metric.key,
                 choice.model,
                 "[red]Failed[/red]",
-                str(exc)[:80],
+                "—",
             )
+            failures.append((choice.metric.key, str(exc)))
 
     console.print(results_table)
+
+    if failures:
+        console.print("\n[red bold]Errors:[/red bold]")
+        for key, msg in failures:
+            console.print(f"[red]• {key}[/red]\n  {msg}\n")
 
 
 if __name__ == "__main__":

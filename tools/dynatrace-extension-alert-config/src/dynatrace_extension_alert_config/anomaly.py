@@ -90,14 +90,16 @@ def build_payload(choice: DetectorChoice, extension_name: str) -> dict:
                 "name": analyzer_name,
                 "input": {"analyzer_input_field": _analyzer_input(choice, query)},
             },
+            # builtin:davis.anomaly-detectors event template — note this schema
+            # does NOT use the metric-events `eventType` field.
             "eventTemplate": {
                 "title": build_event_title(extension_name, metric_name, choice.split_dimensions),
                 "description": (
                     f"The metric {metric.key} is {{alert_condition}} "
                     f"the threshold of {{threshold}}."
                 ),
-                "eventType": "CUSTOM_ALERT",
                 "davisMerge": True,
+                "metadata": [],
             },
         },
     }

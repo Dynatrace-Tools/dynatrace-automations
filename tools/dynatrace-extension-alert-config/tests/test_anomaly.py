@@ -143,8 +143,10 @@ def test_payload_query_uses_split_dims(sample_metric):
 def test_event_template_fields(sample_metric):
     choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE")
     et = build_payload(choice, "Meraki")["value"]["eventTemplate"]
-    assert et["eventType"] == "CUSTOM_ALERT"
+    # davis.anomaly-detectors event template has no metric-events `eventType`
+    assert "eventType" not in et
     assert et["davisMerge"] is True
+    assert et["metadata"] == []
 
 
 def test_build_all_payloads(sample_metric):
