@@ -7,7 +7,13 @@ def build_payload(choice: DetectorChoice, extension_name: str) -> dict:
     """Build a single builtin:anomaly-detection.metric-events settings object."""
     metric = choice.metric
     summary = f"{extension_name} – {metric.key} anomaly detection"
-    title = metric.name if metric.name and metric.name != metric.key else metric.key
+
+    # Title uses the metric description when available, falling back to the
+    # display name and finally the metric key. {alert_condition} and {threshold}
+    # are Dynatrace event-template placeholders resolved at event time (for
+    # baseline models {threshold} resolves to the computed baseline value).
+    subject = metric.description or metric.name or metric.key
+    title = f"{subject} is {{alert_condition}} the threshold of {{threshold}}"
 
     model_props = _build_model_properties(choice)
 
@@ -21,18 +27,14 @@ def build_payload(choice: DetectorChoice, extension_name: str) -> dict:
                 "type": "METRIC_KEY",
                 "metricKey": metric.key,
                 "aggregation": "AVG",
-                "entityFilter": {
-                    "dimensionKey": "dt.entity.host",
-                    "conditions": [],
-                },
                 "dimensionFilter": [],
             },
             "modelProperties": model_props,
             "eventTemplate": {
-                "title": f"{title} anomaly",
+                "title": title,
                 "description": (
-                    f"The metric {metric.key} triggered an anomaly event. "
-                    "Davis detected that the value went {alert_condition}."
+                    f"The metric {metric.key} is {{alert_condition}} "
+                    f"the threshold of {{threshold}}."
                 ),
                 "eventType": "CUSTOM_ALERT",
                 "davisMerge": True,

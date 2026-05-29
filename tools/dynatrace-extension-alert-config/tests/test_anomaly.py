@@ -18,6 +18,8 @@ def test_auto_adaptive_payload(sample_metric):
     assert v["enabled"] is True
     assert v["queryDefinition"]["metricKey"] == "meraki.device.cpu_usage"
     assert v["queryDefinition"]["type"] == "METRIC_KEY"
+    # entityFilter must NOT be present — detector applies across all entities
+    assert "entityFilter" not in v["queryDefinition"]
     mp = v["modelProperties"]
     assert mp["type"] == "AUTO_ADAPTIVE_BASELINE"
     assert mp["alertCondition"] == "ABOVE"
@@ -80,4 +82,19 @@ def test_event_template_fields(sample_metric):
     et = payload["value"]["eventTemplate"]
     assert et["eventType"] == "CUSTOM_ALERT"
     assert et["davisMerge"] is True
-    assert "anomaly" in et["title"].lower()
+    # Title format: "<description> is {alert_condition} the threshold of {threshold}"
+    assert et["title"] == "CPU Usage is {alert_condition} the threshold of {threshold}"
+    assert "{alert_condition}" in et["description"]
+    assert "{threshold}" in et["description"]
+
+
+def test_title_falls_back_to_name_then_key():
+    from dynatrace_extension_alert_config.models import Metric
+    # No description -> use name
+    m1 = Metric(key="meraki.x", name="X Metric", description="")
+    p1 = build_payload(DetectorChoice(metric=m1, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE"), "Meraki")
+    assert p1["value"]["eventTemplate"]["title"].startswith("X Metric is ")
+    # No description and no name -> use key
+    m2 = Metric(key="meraki.y", name="", description="")
+    p2 = build_payload(DetectorChoice(metric=m2, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE"), "Meraki")
+    assert p2["value"]["eventTemplate"]["title"].startswith("meraki.y is ")
