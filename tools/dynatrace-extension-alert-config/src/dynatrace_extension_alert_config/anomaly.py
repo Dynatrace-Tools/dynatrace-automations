@@ -5,6 +5,11 @@ from .models import DetectorChoice
 SCHEMA_ID = "builtin:davis.anomaly-detectors"
 SOURCE = "dynatrace-extension-alert-config"
 
+# The schema requires executionSettings.queryOffset to be between 1 and 60
+# (minutes). It shifts the sliding evaluation window into the past to absorb
+# data-ingest latency, and is mandatory for every analyzer type.
+DEFAULT_QUERY_OFFSET = 1
+
 _ANALYZER_PREFIX = "dt.statistics.ui.anomaly_detection"
 _ANALYZER_NAMES = {
     "AUTO_ADAPTIVE_BASELINE": f"{_ANALYZER_PREFIX}.AutoAdaptiveAnomalyDetectionAnalyzer",
@@ -68,7 +73,11 @@ def _analyzer_input(choice: DetectorChoice, query: str) -> list[dict]:
     return fields
 
 
-def build_payload(choice: DetectorChoice, extension_name: str) -> dict:
+def build_payload(
+    choice: DetectorChoice,
+    extension_name: str,
+    query_offset: int = DEFAULT_QUERY_OFFSET,
+) -> dict:
     """Build a single builtin:davis.anomaly-detectors settings object."""
     metric = choice.metric
     metric_name = metric.name or metric.key
@@ -91,8 +100,9 @@ def build_payload(choice: DetectorChoice, extension_name: str) -> dict:
                 # `input` is a set of {key, value} fields (not wrapped).
                 "input": _analyzer_input(choice, query),
             },
-            # Required by the schema; queryOffset shifts the sliding window.
-            "executionSettings": {"queryOffset": 0},
+            # Required by the schema; queryOffset (1-60 min) shifts the sliding
+            # window into the past to absorb data-ingest latency.
+            "executionSettings": {"queryOffset": query_offset},
             # The event template is a set of event.* property key/value pairs.
             "eventTemplate": {
                 "properties": [
@@ -115,5 +125,9 @@ def build_payload(choice: DetectorChoice, extension_name: str) -> dict:
     }
 
 
-def build_all_payloads(choices: list[DetectorChoice], extension_name: str) -> list[dict]:
-    return [build_payload(c, extension_name) for c in choices]
+def build_all_payloads(
+    choices: list[DetectorChoice],
+    extension_name: str,
+    query_offset: int = DEFAULT_QUERY_OFFSET,
+) -> list[dict]:
+    return [build_payload(c, extension_name, query_offset) for c in choices]

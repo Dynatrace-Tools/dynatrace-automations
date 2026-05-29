@@ -64,6 +64,14 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--query-offset",
+        type=int,
+        default=1,
+        metavar="MINUTES",
+        help="Query offset in minutes (1-60) for the detector's sliding window. "
+             "Required by the schema; defaults to 1.",
+    )
+    parser.add_argument(
         "--dump-schema",
         action="store_true",
         help="Print the live builtin:davis.anomaly-detectors schema JSON and exit "
@@ -152,7 +160,10 @@ def main() -> None:
         sys.exit(0)
 
     # ── 6. Build payloads ───────────────────────────────────────────────────
-    payloads = build_all_payloads(choices, extension_name=args.name)
+    if not 1 <= args.query_offset <= 60:
+        console.print("[red]--query-offset must be between 1 and 60.[/red]")
+        sys.exit(1)
+    payloads = build_all_payloads(choices, extension_name=args.name, query_offset=args.query_offset)
 
     if args.dry_run:
         console.print("\n[bold yellow]--- DRY RUN: no changes will be made ---[/bold yellow]\n")

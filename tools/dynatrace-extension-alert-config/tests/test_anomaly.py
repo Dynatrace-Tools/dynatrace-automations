@@ -165,7 +165,14 @@ def test_analyzer_input_is_a_list(sample_metric):
 def test_execution_settings_present(sample_metric):
     choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE")
     p = build_payload(choice, "Meraki")
-    assert p["value"]["executionSettings"] is not None
+    # queryOffset must be within the schema's allowed 1-60 range
+    assert p["value"]["executionSettings"]["queryOffset"] == 1
+
+
+def test_query_offset_override(sample_metric):
+    choice = DetectorChoice(metric=sample_metric, model="AUTO_ADAPTIVE_BASELINE", direction="ABOVE")
+    p = build_payload(choice, "Meraki", query_offset=15)
+    assert p["value"]["executionSettings"]["queryOffset"] == 15
 
 
 def test_build_all_payloads(sample_metric):
