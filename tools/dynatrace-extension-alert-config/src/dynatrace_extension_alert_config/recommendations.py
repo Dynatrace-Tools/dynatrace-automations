@@ -11,6 +11,7 @@ meaning are unambiguous, and returns ``None`` otherwise (the user then types a
 value with no pre-fill).
 """
 from __future__ import annotations
+
 from typing import Optional
 
 # Dynatrace unit identifiers that represent a 0-100 percentage.

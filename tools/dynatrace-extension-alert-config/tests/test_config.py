@@ -1,10 +1,5 @@
 import json
-import stat
-import tempfile
-from pathlib import Path
 from unittest import mock
-
-import pytest
 
 
 def test_save_and_load_credentials(tmp_path):
@@ -12,7 +7,7 @@ def test_save_and_load_credentials(tmp_path):
 
     with mock.patch("dynatrace_extension_alert_config.config.CONFIG_DIR", config_dir), \
          mock.patch("dynatrace_extension_alert_config.config.CREDS_FILE", config_dir / "OAuth.json"):
-        from dynatrace_extension_alert_config.config import save_credentials, load_credentials
+        from dynatrace_extension_alert_config.config import load_credentials, save_credentials
 
         creds = {
             "clientId": "dt0s02.TEST",

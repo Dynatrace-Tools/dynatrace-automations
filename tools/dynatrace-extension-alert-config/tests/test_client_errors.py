@@ -1,4 +1,3 @@
-from unittest import mock
 
 from dynatrace_extension_alert_config.client import DynatraceApiError, _extract_error
 
@@ -17,10 +16,8 @@ class _FakeResp:
 
 
 def test_extract_403_required_scope_list():
-    resp = _FakeResp(
-        403,
-        {"error": {"code": 403, "message": "Token is missing required scope. Use one of: [extensions.read, extensions.write]"}},
-    )
+    msg = "Token is missing required scope. Use one of: [extensions.read, extensions.write]"
+    resp = _FakeResp(403, {"error": {"code": 403, "message": msg}})
     err = _extract_error(resp)
     assert isinstance(err, DynatraceApiError)
     assert err.status == 403

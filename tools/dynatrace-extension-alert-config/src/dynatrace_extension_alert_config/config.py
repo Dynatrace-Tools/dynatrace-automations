@@ -1,7 +1,7 @@
 from __future__ import annotations
+
 import getpass
 import json
-import os
 import stat
 from pathlib import Path
 from typing import Optional

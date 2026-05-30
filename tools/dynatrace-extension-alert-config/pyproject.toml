@@ -25,7 +25,7 @@ dynatrace-extension-alert-config = "dynatrace_extension_alert_config.cli:main"
 where = ["src"]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]

@@ -45,6 +45,7 @@ inherits the group's. A more specific ``featureSet`` overrides a less specific
 one. Metrics with no feature set anywhere are reported as ``default``.
 """
 from __future__ import annotations
+
 import io
 import zipfile
 from typing import Optional

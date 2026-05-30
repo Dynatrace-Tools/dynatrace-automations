@@ -1,5 +1,5 @@
 from dynatrace_extension_alert_config.docs_scraper import slugify
-from dynatrace_extension_alert_config.extensions import _normalize_name, _fuzzy_match
+from dynatrace_extension_alert_config.extensions import _fuzzy_match, _normalize_name
 
 
 class TestSlugify:

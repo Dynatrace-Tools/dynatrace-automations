@@ -32,7 +32,10 @@ class TestEnvIdOverride:
 
         with mock.patch("dynatrace_extension_alert_config.config.CONFIG_DIR", config_dir), \
              mock.patch("dynatrace_extension_alert_config.config.CREDS_FILE", creds_file):
-            from dynatrace_extension_alert_config.config import save_credentials, get_or_prompt_credentials
+            from dynatrace_extension_alert_config.config import (
+                get_or_prompt_credentials,
+                save_credentials,
+            )
 
             stored = {
                 "clientId": "dt0s02.TEST",
@@ -54,7 +57,10 @@ class TestEnvIdOverride:
 
         with mock.patch("dynatrace_extension_alert_config.config.CONFIG_DIR", config_dir), \
              mock.patch("dynatrace_extension_alert_config.config.CREDS_FILE", creds_file):
-            from dynatrace_extension_alert_config.config import save_credentials, get_or_prompt_credentials
+            from dynatrace_extension_alert_config.config import (
+                get_or_prompt_credentials,
+                save_credentials,
+            )
 
             stored = {
                 "clientId": "dt0s02.TEST",
