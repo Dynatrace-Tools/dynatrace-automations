@@ -175,9 +175,32 @@ dynatrace-extension-alert-config --name meraki --env-id abc12345 --dump-schema
 | `--query-offset` | `1` | Detector query offset in minutes (1-60). See [section 11](#11-thresholds--sample-windows--what-is-set-and-why). |
 | `--scopes` | the five above | Override the OAuth scopes requested. Only add scopes your client actually has. |
 | `--reconfigure` | off | Re-enter and re-save the OAuth credentials. |
-| `--dry-run` | off | Print the JSON payloads; make **no** API calls. |
-| `--yes` | off | Non-interactive: create an **Auto-Adaptive Baseline / Above** detector for **every** metric, with **no** split dimensions. |
+| `--dry-run` | off | Print the JSON payloads (annotated with would-CREATE / would-SKIP); make **no** API calls. |
+| `--yes` | off | Non-interactive: create an **Auto-Adaptive Baseline / Above** detector for **every** metric, with **no** split dimensions. Also skips the `--undo` confirmation. |
+| `--undo` | off | **Delete** the detectors this tool created for `--name`. Confirms first unless `--yes`. |
 | `--dump-schema` | off | Print the live `builtin:davis.anomaly-detectors` schema JSON and exit. |
+
+### Safe to run twice (idempotency)
+
+Re-running the tool will **not** create duplicate detectors. Before creating, it reads the existing `builtin:davis.anomaly-detectors` objects and classifies each metric:
+
+- **identical** — a detector with the same title *and* the same model / threshold / query already exists → **skipped**.
+- **differs** — a detector with the same name exists but with different settings (e.g. you changed the threshold) → **skipped and flagged**, so you're never surprised by a silent duplicate. To replace it, `--undo` then re-run.
+- **new** — created.
+
+A summary line reports `created / already existed / differ / failed`.
+
+### Undoing
+
+```bash
+# Remove everything this tool created for an extension (asks for confirmation first)
+dynatrace-extension-alert-config --name "Meraki Extension" --env-id abc12345 --undo
+
+# Skip the confirmation
+dynatrace-extension-alert-config --name "Meraki Extension" --env-id abc12345 --undo --yes
+```
+
+Undo only ever touches objects **this tool created** (matched by the `source: dynatrace-extension-alert-config` tag) **and** whose name starts with `<Extension> - `, so it never deletes detectors you built by hand or for other extensions.
 
 ---
 

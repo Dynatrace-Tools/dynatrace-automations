@@ -106,6 +106,13 @@ class DynatraceClient:
             raise _extract_error(resp)
         return resp.json()
 
+    def _delete(self, path: str) -> None:
+        resp = self._session.delete(
+            f"{self._base}{path}", headers=self._auth_header(), timeout=30
+        )
+        if not resp.ok:
+            raise _extract_error(resp)
+
     # ── Settings ──────────────────────────────────────────────────────────────
 
     def get_schema(self, schema_id: str) -> dict:
@@ -129,8 +136,32 @@ class DynatraceClient:
         raise DynatraceApiError(code or 400, message)
 
     def list_settings_objects(self, schema_id: str) -> list[dict]:
-        data = self._get("/api/v2/settings/objects", params={"schemaIds": schema_id})
-        return data.get("items", [])
+        """Return all settings objects for a schema, including their values.
+
+        Each item is ``{"objectId": ..., "value": {...}}``. Paginates through
+        all pages.
+        """
+        results: list[dict] = []
+        next_page: Optional[str] = None
+        while True:
+            params: dict = {
+                "schemaIds": schema_id,
+                "scopes": "environment",
+                "fields": "objectId,value",
+                "pageSize": 500,
+            }
+            if next_page:
+                params = {"nextPageKey": next_page}
+            data = self._get("/api/v2/settings/objects", params=params)
+            results.extend(data.get("items", []))
+            next_page = data.get("nextPageKey")
+            if not next_page:
+                break
+        return results
+
+    def delete_settings_object(self, object_id: str) -> None:
+        """Delete a single settings object by its objectId."""
+        self._delete(f"/api/v2/settings/objects/{object_id}")
 
     # ── Extensions 2.0 ────────────────────────────────────────────────────────
 
