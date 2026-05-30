@@ -108,6 +108,7 @@ def _collect_metric_metadata(doc: dict) -> dict[str, Metric]:
             name=meta.get("displayName", "") or key,
             description=meta.get("description", "") or "",
             dimensions=_dimension_keys(meta),
+            unit=str(meta.get("unit", "") or ""),
         )
     return out
 

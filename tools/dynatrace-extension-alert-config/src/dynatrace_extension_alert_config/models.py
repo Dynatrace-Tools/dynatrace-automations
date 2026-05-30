@@ -10,6 +10,7 @@ class Metric:
     description: str = ""
     feature_set: str = "default"
     dimensions: list[str] = field(default_factory=list)
+    unit: str = ""
 
 
 @dataclass

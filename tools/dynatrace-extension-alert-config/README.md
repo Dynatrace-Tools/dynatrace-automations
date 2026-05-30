@@ -76,7 +76,7 @@ Before you run the tool, make sure all of the following are true:
 - **An OAuth client** (Account Management → Identity & access management → OAuth clients) with:
   - your **Client ID** and **Client Secret**,
   - your **account URN** (`urn:dtaccount:<uuid>`) used as the `resource`,
-  - the five **scopes** listed in [§6](#6-oauth-scopes--what-each-one-is-for).
+  - the five **scopes** listed in [section 6](#6-oauth-scopes--what-each-one-is-for).
 - **Your environment URL / ID**, e.g. `https://abc12345.live.dynatrace.com` (or just `abc12345`).
 - **Python 3.10+**.
 
@@ -172,7 +172,7 @@ dynatrace-extension-alert-config --name meraki --env-id abc12345 --dump-schema
 |---|---|---|
 | `--name` | *(required)* | Extension name as shown on the Hub. Fuzzy-matched; casing and a trailing "extension" word are ignored. |
 | `--env-id` | stored value | Environment ID (e.g. `abc12345`) → builds `https://<env-id>.live.dynatrace.com` and overrides the stored `environmentUrl` for this run only. |
-| `--query-offset` | `1` | Detector query offset in minutes (1–60). See [§11](#11-thresholds--sample-windows--what-is-set-and-why). |
+| `--query-offset` | `1` | Detector query offset in minutes (1-60). See [section 11](#11-thresholds--sample-windows--what-is-set-and-why). |
 | `--scopes` | the five above | Override the OAuth scopes requested. Only add scopes your client actually has. |
 | `--reconfigure` | off | Re-enter and re-save the OAuth credentials. |
 | `--dry-run` | off | Print the JSON payloads; make **no** API calls. |
@@ -190,8 +190,8 @@ dynatrace-extension-alert-config --name meraki --env-id abc12345 --dump-schema
 5. **Metric selection** — a checkbox list (grouped by feature set). Space toggles, Enter confirms.
 6. **Per-metric configuration**, for each selected metric:
    - **Detection model** — Auto-Adaptive Baseline / Seasonal Baseline / Static Threshold.
-   - **Threshold value** *(static only)* — numeric.
    - **Alert direction** — Above / Below.
+   - **Threshold value** *(static only)* — numeric. If the metric's unit is recognizable (e.g. a percentage), a **recommended default is pre-filled** — press Enter to accept or type your own. See [Unit-based threshold recommendations](#unit-based-threshold-recommendations).
    - **Split dimension(s)** — a checkbox of that metric's dimensions (or skip for no split).
 7. **Create** — one `POST /api/v2/settings/objects` per metric. A results table shows Created (with Object ID) or Failed (with the full validation error printed below the table).
 
@@ -249,7 +249,7 @@ timeseries { avg(<metricKey>), value.A = avg(<metricKey>, scalar: true) }, by: {
 - `by: { … }` — present only when you chose split dimensions; each value becomes an independently-evaluated series.
 - `interval: 1m` — **mandatory** for Davis anomaly detectors.
 
-> Aggregation is always `avg`. To use `sum`/`min`/`max`/etc., edit the detector after creation (see [§12](#12-what-is-set-automatically-vs-what-you-must-set-yourself)).
+> Aggregation is always `avg`. To use `sum`/`min`/`max`/etc., edit the detector after creation (see [section 12](#12-what-is-set-automatically-vs-what-you-must-set-yourself)).
 
 **Placeholders** (`{alert_condition}`, `{threshold}`, `{dims:<dim>}`) are resolved by Dynatrace at event-fire time.
 
@@ -276,13 +276,29 @@ Every detector carries a set of **sample-window** parameters that govern *how pe
 | Parameter | Default | Dynatrace meaning | Why this default |
 |---|---|---|---|
 | `slidingWindow` | **5** | The size of the evaluation window, in 1-minute samples. Davis looks at the last *5* minutes at any moment. | Five minutes smooths out single-sample spikes while staying responsive. |
-| `violatingSamples` | **3** | How many of those samples (within the window) must breach the threshold/baseline to **open** a problem. | 3-of-5 means a clear majority — enough to filter transient blips, not so many that real issues are missed. Must be ≤ `slidingWindow`. |
+| `violatingSamples` | **3** | How many of those samples (within the window) must breach the threshold/baseline to **open** a problem. | 3-of-5 means a clear majority — enough to filter transient blips, not so many that real issues are missed. Must be <= `slidingWindow`. |
 | `dealertingSamples` | **5** | How many consecutive samples must return to normal to **close** the problem. | Requiring a full clean window prevents a problem from flapping open/closed on noisy data. |
 | `alertOnMissingData` | **false** | Whether a gap in data is treated as a violation. | Off by default so that a metric simply not reporting (e.g. a powered-off device) doesn't generate alert noise. Turn it on in the app if "no data" is itself a problem. |
-| `queryOffset` (`executionSettings`) | **1** (override with `--query-offset`) | Minutes to shift the evaluation window into the past. The schema **requires** 1–60. | Metrics arrive with some ingest latency; evaluating a slightly-delayed window means Davis scores **complete** data rather than a minute that's still filling. `1` is the minimum the schema allows — there is no "zero offset". |
+| `queryOffset` (`executionSettings`) | **1** (override with `--query-offset`) | Minutes to shift the evaluation window into the past. The schema **requires** 1-60. | Metrics arrive with some ingest latency; evaluating a slightly-delayed window means Davis scores **complete** data rather than a minute that's still filling. `1` is the minimum the schema allows — there is no "zero offset". |
 | `threshold` *(static only)* | *(you provide it)* | The fixed value compared against each sample, in the metric's own unit. | Domain-specific — only you know what value is "bad". |
 
 > **These are sensible starting points, not gospel.** `slidingWindow`, `violatingSamples`, `dealertingSamples`, and `alertOnMissingData` are currently **hardcoded defaults** in the tool. To change them, either edit the detector in the Davis Anomaly Detection app after creation, or adjust the constants in `anomaly.py`. Only `queryOffset` is exposed as a flag (`--query-offset`).
+
+### Unit-based threshold recommendations
+
+For a **Static Threshold** detector you still have to pick the threshold value — but the tool can pre-fill a sensible starting point **without any AI**, purely from the metric's declared `unit`.
+
+Extension metrics carry a `unit` in their `extension.yaml` metadata (for example `Percent`, `Ratio`, `MilliSecond`, `Byte`). When the unit has an unambiguous, bounded range, the tool suggests a default based on the alert direction you chose:
+
+| Metric unit | Range | Recommended for **Above** | Recommended for **Below** |
+|---|---|---|---|
+| `Percent` (e.g. `%`) | 0-100 | **80** | **20** |
+| `Ratio` | 0-1 | **0.8** | **0.2** |
+| anything else | unknown | *(no pre-fill — you type the value)* | *(no pre-fill)* |
+
+So for a metric like `device.cpu_usage` reported in `Percent`, choosing **Above** pre-fills `80`; press Enter to accept or type your own. The recommendation is only a **default** — it never overrides what you type, and unknown units simply leave the field blank. The metric's unit is also shown in the selection summary table and in the threshold prompt so you always have the context.
+
+> Why only these units? A percentage or ratio has a fixed, well-understood range, so "alert above 80%" is defensible for any percentage metric. Units like milliseconds or bytes have no universal "bad" value, so the tool deliberately makes no guess. To adjust the recommended values or add more units, edit `recommendations.py`.
 
 ---
 
@@ -291,16 +307,16 @@ Every detector carries a set of **sample-window** parameters that govern *how pe
 ### Chosen interactively (per metric), every run
 - **Which metrics** get a detector (checkbox).
 - **Detection model** (static / auto-adaptive / seasonal).
-- **Threshold value** (static model only).
 - **Alert direction** (above / below).
+- **Threshold value** (static model only) — pre-filled with a unit-based recommendation you can accept or override.
 - **Split dimension(s)**.
 
 ### Set automatically by the tool (fixed conventions)
 - Schema `builtin:davis.anomaly-detectors`, scope `environment`, `enabled: true`.
-- **Config name** and **event name/description** (the naming convention in [§9](#9-what-gets-created--anatomy-of-a-detector)).
+- **Config name** and **event name/description** (the naming convention in [section 9](#9-what-gets-created--anatomy-of-a-detector)).
 - DQL query shape with `avg()` aggregation and `interval: 1m`.
 - `source: dynatrace-extension-alert-config` (so you can filter all tool-created detectors in the app).
-- Sample-window defaults from [§11](#11-thresholds--sample-windows--what-is-set-and-why).
+- Sample-window defaults from [section 11](#11-thresholds--sample-windows--what-is-set-and-why).
 - `queryOffset` (defaults to 1, or `--query-offset`).
 
 ### Must be set/changed by you (not auto-detected — edit after creation)
@@ -349,11 +365,11 @@ Trigger or wait for a test event and confirm the **event name** renders the plac
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `OAuth 400 Bad Request` at startup | A requested scope is invalid or not granted; SSO rejects the whole request. | Grant all five scopes ([§6](#6-oauth-scopes--what-each-one-is-for)); confirm `resource` is your account URN. |
+| `OAuth 400 Bad Request` at startup | A requested scope is invalid or not granted; SSO rejects the whole request. | Grant all five scopes ([section 6](#6-oauth-scopes--what-each-one-is-for)); confirm `resource` is your account URN. |
 | `403 Forbidden` on `/api/v2/extensions` | Token lacks `environment-api:extensions:read`. | Add that scope. The error now prints the exact required scope. |
 | `Could not resolve extension …` | Extension not installed, name mismatch, or docs fallback blocked. | Check the name/installation; the env-API path needs the extensions scope. |
 | Create fails with `Validation failed for N Validators` | A payload field doesn't match the live schema. | The full message is printed under **Errors**. Run `--dump-schema` to compare against your tenant's schema. |
-| `queryOffset: Value must be between 1 and 60` | Offset out of range. | Use `--query-offset` with 1–60. |
+| `queryOffset: Value must be between 1 and 60` | Offset out of range. | Use `--query-offset` with 1-60. |
 | `Access Token is invalid` on create | Token expired during a long interactive session. | Already handled — the client refreshes the token per request. If you still see it, re-run. |
 
 ---

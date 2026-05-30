@@ -6,6 +6,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .models import DetectorChoice, ExtensionInfo, Metric
+from .recommendations import format_number, recommend_threshold
 
 console = Console()
 
@@ -26,10 +27,11 @@ def _display_extension_summary(info: ExtensionInfo) -> None:
     table.add_column("Feature Set", style="cyan")
     table.add_column("Metric Key", style="white")
     table.add_column("Metric Name", style="dim white")
+    table.add_column("Unit", style="dim white")
     table.add_column("Dimensions", style="dim white")
     for fs in info.feature_sets:
         for m in fs.metrics:
-            table.add_row(fs.name, m.key, m.name, ", ".join(m.dimensions) or "—")
+            table.add_row(fs.name, m.key, m.name, m.unit or "—", ", ".join(m.dimensions) or "—")
     console.print(table)
 
 
@@ -59,7 +61,8 @@ def select_metrics(info: ExtensionInfo) -> list[Metric]:
 def configure_detector(metric: Metric) -> Optional[DetectorChoice]:
     """Interactively configure a single metric's detector settings."""
     # questionary prompts are plain text — render emphasis via rich separately.
-    console.rule(f"[bold cyan]{metric.key}[/bold cyan]")
+    unit_suffix = f"  [unit: {metric.unit}]" if metric.unit else ""
+    console.rule(f"[bold cyan]{metric.key}[/bold cyan]{unit_suffix}")
 
     model = questionary.select(
         f"Detection model for {metric.key}:",
@@ -68,22 +71,33 @@ def configure_detector(metric: Metric) -> Optional[DetectorChoice]:
     if model is None:
         return None
 
-    threshold: Optional[float] = None
-    if model == "STATIC_THRESHOLD":
-        raw = questionary.text(
-            "Static threshold value (numeric):",
-            validate=lambda v: _validate_number(v),
-        ).ask()
-        if raw is None:
-            return None
-        threshold = float(raw)
-
+    # Direction is asked before the threshold so we can recommend a value that
+    # depends on it (e.g. above 80% vs. below 20% for a percentage metric).
     direction = questionary.select(
         "Alert when metric goes:",
         choices=DIRECTION_CHOICES,
     ).ask()
     if direction is None:
         return None
+
+    threshold: Optional[float] = None
+    if model == "STATIC_THRESHOLD":
+        recommended = recommend_threshold(metric.unit, direction)
+        prompt = "Static threshold value (numeric)"
+        if metric.unit:
+            prompt += f" [unit: {metric.unit}]"
+        default = ""
+        if recommended is not None:
+            default = format_number(recommended)
+            prompt += f" — recommended {default}"
+        raw = questionary.text(
+            prompt + ":",
+            default=default,
+            validate=lambda v: _validate_number(v),
+        ).ask()
+        if raw is None:
+            return None
+        threshold = float(raw)
 
     split_dimensions: list[str] = []
     if metric.dimensions:

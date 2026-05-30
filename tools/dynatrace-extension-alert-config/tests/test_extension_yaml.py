@@ -100,6 +100,12 @@ def test_metadata_dimensions_extracted():
     assert "device.serial" in cpu.dimensions
 
 
+def test_metadata_unit_extracted():
+    info = parse_extension_yaml(SAMPLE_YAML, ext_display_name="Meraki")
+    cpu = next(m for fs in info.feature_sets for m in fs.metrics if m.key == "meraki.device.cpu_usage")
+    assert cpu.unit == "Percent"
+
+
 def test_inherited_group_subgroup_dimensions():
     info = parse_extension_yaml(SNMP_YAML, ext_display_name="NetDev")
     m = next(mm for fs in info.feature_sets for mm in fs.metrics if mm.key == "net.if.bytes_in")

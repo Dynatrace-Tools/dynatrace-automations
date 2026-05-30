@@ -65,7 +65,19 @@ The response is an **array** (one result per object). On success each item carri
 | `violatingSamples` | `"3"` | fixed default | Samples in the window that must breach to **open** a problem. |
 | `slidingWindow` | `"5"` | fixed default | Evaluation window size, in 1-minute samples. |
 | `dealertingSamples` | `"5"` | fixed default | Clean samples required to **close** a problem. |
-| `threshold` | the number you entered | static only | The fixed comparison value, in the metric's base unit. Omitted for baseline models. |
+| `threshold` | the number you entered | static only | The fixed comparison value, in the metric's base unit. Omitted for baseline models. For recognizable units the prompt pre-fills a recommendation (see below). |
+
+#### Unit-based threshold recommendation (static model)
+
+The static-threshold prompt is pre-filled from the metric's `unit` (read from `extension.yaml` metadata). No AI is involved — it's a fixed lookup:
+
+| Unit | Range | Above | Below |
+|---|---|---|---|
+| `Percent` / `%` | 0-100 | `80` | `20` |
+| `Ratio` | 0-1 | `0.8` | `0.2` |
+| other | unknown | *(blank)* | *(blank)* |
+
+The value is only a default; typing your own overrides it. Adjust in `recommendations.py`.
 
 ### The DQL query
 
