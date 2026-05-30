@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dynatrace-extension-alert-config"
+version = "0.1.0"
+description = "Create Davis Anomaly Detection configurations for all metrics in a Dynatrace extension"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Dynatrace Tools"}]
+dependencies = [
+    "requests>=2.31.0",
+    "questionary>=2.0.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+dynatrace-extension-alert-config = "dynatrace_extension_alert_config.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
