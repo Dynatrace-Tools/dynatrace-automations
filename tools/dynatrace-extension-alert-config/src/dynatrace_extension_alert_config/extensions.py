@@ -4,7 +4,6 @@ import re
 from typing import Optional
 
 from .client import DynatraceApiError, DynatraceClient
-from .docs_scraper import scrape_extension
 from .extension_yaml import parse_extension_zip
 from .models import ExtensionInfo, FeatureSet, Metric
 
@@ -83,7 +82,7 @@ def _parse_extension_yaml(schema_data: dict, ext_display_name: str) -> Extension
 
 
 def resolve_extension(name: str, client: DynatraceClient) -> ExtensionInfo:
-    """Resolve an extension by display name, using env API first then docs fallback."""
+    """Resolve an extension by display name via the environment Extensions 2.0 API."""
     from rich.console import Console
     console = Console()
 
@@ -146,18 +145,13 @@ def resolve_extension(name: str, client: DynatraceClient) -> ExtensionInfo:
     except Exception as exc:
         console.print(f"[yellow]Environment API lookup failed:[/yellow] {exc}")
 
-    # --- Fallback: docs scraping ---
-    console.print("[yellow]Falling back to Dynatrace docs scraping…[/yellow]")
-    info = scrape_extension(name)
-    if info and info.feature_sets:
-        return info
-
     raise ExtensionNotFoundError(
-        f"Could not resolve extension '{name}' from the environment API or the docs.\n"
-        "  • Environment API: ensure your OAuth client has an extensions read scope "
-        "(see the hint above) and that the extension is installed.\n"
-        "  • Docs fallback: docs.dynatrace.com blocks automated requests (HTTP 403), "
-        "so scraping is unreliable.\n"
+        f"Could not resolve extension '{name}' from the environment API.\n"
+        "  • Ensure your OAuth client has an extensions read scope "
+        "(environment-api:extensions:read — see the hint above).\n"
+        "  • Ensure the extension is installed/active in this environment.\n"
+        "  • Check the name matches the installed extension (casing and the word "
+        "'extension' are ignored).\n"
         "Tip: run with --scopes to add the required extension scope."
     )
 

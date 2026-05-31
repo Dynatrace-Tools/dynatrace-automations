@@ -28,7 +28,7 @@ def test_all_modules_import():
     import importlib
 
     for name in [
-        "anomaly", "auth", "client", "config", "docs_scraper",
+        "anomaly", "auth", "client", "config",
         "extension_yaml", "extensions", "interactive", "models", "recommendations",
     ]:
         importlib.import_module(f"dynatrace_extension_alert_config.{name}")
