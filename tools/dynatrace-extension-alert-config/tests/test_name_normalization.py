@@ -1,29 +1,4 @@
-from dynatrace_extension_alert_config.docs_scraper import slugify
 from dynatrace_extension_alert_config.extensions import _fuzzy_match, _normalize_name
-
-
-class TestSlugify:
-    def test_meraki(self):
-        assert slugify("meraki") == "meraki"
-
-    def test_meraki_extension_title_case(self):
-        assert slugify("Meraki Extension") == "meraki"
-
-    def test_microsoft_365_office_365(self):
-        assert slugify("Microsoft 365, Office 365") == "microsoft-365-office-365"
-
-    def test_leading_trailing_spaces(self):
-        assert slugify("  meraki  ") == "meraki"
-
-    def test_special_chars_replaced(self):
-        assert slugify("my/tool.name") == "my-tool-name"
-
-    def test_no_double_hyphens(self):
-        result = slugify("foo   bar")
-        assert "--" not in result
-
-    def test_lowercase_output(self):
-        assert slugify("MERAKI") == "meraki"
 
 
 class TestNormalizeName:

@@ -131,3 +131,53 @@ def build_all_payloads(
     query_offset: int = DEFAULT_QUERY_OFFSET,
 ) -> list[dict]:
     return [build_payload(c, extension_name, query_offset) for c in choices]
+
+
+# ── Idempotency helpers ──────────────────────────────────────────────────────
+
+def config_title(value: dict) -> str:
+    """The detector's logical identity: '<Extension> - <Metric Name>'.
+
+    Two configs with the same title target the same metric/extension.
+    """
+    return value.get("title", "")
+
+
+def config_signature(value: dict) -> tuple:
+    """A full comparable signature including model + thresholds + query.
+
+    Two configs with the same signature are identical in every way this tool
+    controls (title, analyzer model, and every analyzer input — which includes
+    the query, alertCondition, threshold and sample windows). Used to decide
+    whether an equivalent detector already exists.
+    """
+    analyzer = value.get("analyzer", {}) or {}
+    inputs = analyzer.get("input", []) or []
+    norm_inputs = tuple(sorted(
+        (str(f.get("key")), str(f.get("value"))) for f in inputs if isinstance(f, dict)
+    ))
+    return (config_title(value), analyzer.get("name", ""), norm_inputs)
+
+
+def classify_against_existing(new_value: dict, existing_values: list[dict]) -> str:
+    """Classify a to-be-created config against what already exists.
+
+    Returns one of:
+    - "identical" : an existing detector matches title + model + thresholds exactly
+    - "conflict"  : a detector with the same title exists but with different settings
+    - "new"       : no existing detector targets this metric
+    """
+    new_sig = config_signature(new_value)
+    new_title = config_title(new_value)
+    same_title = False
+    for ev in existing_values:
+        if config_signature(ev) == new_sig:
+            return "identical"
+        if config_title(ev) == new_title and new_title:
+            same_title = True
+    return "conflict" if same_title else "new"
+
+
+def is_tool_created(value: dict) -> bool:
+    """True if a settings object was created by this tool (by its source tag)."""
+    return value.get("source") == SOURCE

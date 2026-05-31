@@ -8,7 +8,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from .anomaly import build_all_payloads
+from .anomaly import (
+    SCHEMA_ID,
+    build_all_payloads,
+    classify_against_existing,
+    config_title,
+    is_tool_created,
+)
 from .auth import AuthError
 from .client import DynatraceClient
 from .config import get_or_prompt_credentials
@@ -78,6 +84,13 @@ def _parse_args() -> argparse.Namespace:
         help="Print the live builtin:davis.anomaly-detectors schema JSON and exit "
              "(useful for verifying the exact payload structure).",
     )
+    parser.add_argument(
+        "--undo",
+        action="store_true",
+        help="Delete the anomaly detectors this tool created for --name "
+             "(matched by source tag + the '<Extension> - ' title prefix). "
+             "Prompts for confirmation unless --yes is given.",
+    )
     return parser.parse_args()
 
 
@@ -143,6 +156,11 @@ def main() -> None:
         console.print_json(json.dumps(schema))
         sys.exit(0)
 
+    # ── Undo: delete tool-created detectors for this extension ───────────────
+    if args.undo:
+        _run_undo(client, args.name, assume_yes=args.yes)
+        return
+
     # ── 4. Resolve extension ────────────────────────────────────────────────
     try:
         info = resolve_extension(args.name, client)
@@ -173,46 +191,136 @@ def main() -> None:
         sys.exit(1)
     payloads = build_all_payloads(choices, extension_name=args.name, query_offset=args.query_offset)
 
+    # Idempotency: fetch what already exists so we never create duplicates.
+    try:
+        existing_values = [
+            item.get("value", {}) for item in client.list_settings_objects(SCHEMA_ID)
+        ]
+    except Exception as exc:
+        console.print(f"[yellow]Could not read existing detectors (idempotency "
+                      f"check skipped): {exc}[/yellow]")
+        existing_values = []
+
     if args.dry_run:
         console.print("\n[bold yellow]--- DRY RUN: no changes will be made ---[/bold yellow]\n")
-        for p in payloads:
+        for choice, p in zip(choices, payloads):
+            status = classify_against_existing(p["value"], existing_values)
+            label = {
+                "new": "[green]would CREATE[/green]",
+                "identical": "[dim]already exists — would SKIP[/dim]",
+                "conflict": "[yellow]exists with different settings — would SKIP[/yellow]",
+            }[status]
+            console.print(f"{label}  [cyan]{choice.metric.key}[/cyan]")
             console.print_json(json.dumps(p))
         sys.exit(0)
 
-    # ── 7. POST to Settings API ─────────────────────────────────────────────
-    console.print(f"\nCreating [bold]{len(payloads)}[/bold] anomaly detector(s)…")
+    # ── 7. POST to Settings API (idempotent) ─────────────────────────────────
+    console.print(f"\nProcessing [bold]{len(payloads)}[/bold] detector(s)…")
 
     results_table = Table(show_lines=True)
     results_table.add_column("Metric Key", style="cyan")
     results_table.add_column("Model", style="white")
     results_table.add_column("Status", style="white")
-    results_table.add_column("Object ID", style="dim white")
+    results_table.add_column("Object ID / Note", style="dim white")
 
     failures: list[tuple[str, str]] = []
+    created = skipped = conflicts = 0
     for choice, payload in zip(choices, payloads):
+        status = classify_against_existing(payload["value"], existing_values)
+        if status == "identical":
+            skipped += 1
+            results_table.add_row(choice.metric.key, choice.model,
+                                  "[dim]Exists[/dim]", "identical — skipped")
+            continue
+        if status == "conflict":
+            conflicts += 1
+            results_table.add_row(choice.metric.key, choice.model,
+                                  "[yellow]Exists[/yellow]", "differs — skipped (see note)")
+            continue
         try:
             obj_id = client.create_settings_object(payload)
-            results_table.add_row(
-                choice.metric.key,
-                choice.model,
-                "[green]Created[/green]",
-                obj_id or "—",
-            )
+            created += 1
+            results_table.add_row(choice.metric.key, choice.model,
+                                  "[green]Created[/green]", obj_id or "—")
         except Exception as exc:
-            results_table.add_row(
-                choice.metric.key,
-                choice.model,
-                "[red]Failed[/red]",
-                "—",
-            )
+            results_table.add_row(choice.metric.key, choice.model, "[red]Failed[/red]", "—")
             failures.append((choice.metric.key, str(exc)))
 
     console.print(results_table)
+    console.print(
+        f"\n[bold]Summary:[/bold] [green]{created} created[/green], "
+        f"[dim]{skipped} already existed[/dim], "
+        f"[yellow]{conflicts} differ[/yellow], [red]{len(failures)} failed[/red]."
+    )
+
+    if conflicts:
+        console.print(
+            "\n[yellow]Some detectors already exist with different settings "
+            "(e.g. a changed threshold). They were left untouched. To replace "
+            f"them, run:[/yellow]\n  [cyan]dynatrace-extension-alert-config "
+            f'--name "{args.name}" --env-id <env> --undo[/cyan]  then re-run.'
+        )
 
     if failures:
         console.print("\n[red bold]Errors:[/red bold]")
         for key, msg in failures:
             console.print(f"[red]• {key}[/red]\n  {msg}\n")
+
+
+def _run_undo(client: DynatraceClient, extension_name: str, assume_yes: bool = False) -> None:
+    """Delete the detectors this tool created for the given extension name."""
+    try:
+        items = client.list_settings_objects(SCHEMA_ID)
+    except Exception as exc:
+        console.print(f"[red]Could not list existing detectors:[/red] {exc}")
+        sys.exit(1)
+
+    prefix = f"{extension_name} - "
+    targets = [
+        it for it in items
+        if is_tool_created(it.get("value", {}))
+        and config_title(it.get("value", {})).startswith(prefix)
+    ]
+
+    if not targets:
+        console.print(
+            f"[yellow]Nothing to undo — no tool-created detectors found for "
+            f"'{extension_name}'.[/yellow]"
+        )
+        return
+
+    table = Table(title=f"Detectors to delete for '{extension_name}'", show_lines=False)
+    table.add_column("Title", style="cyan")
+    table.add_column("Object ID", style="dim white")
+    for it in targets:
+        table.add_row(config_title(it.get("value", {})), it.get("objectId", "—"))
+    console.print(table)
+
+    if not assume_yes:
+        import questionary
+        confirmed = questionary.confirm(
+            f"Delete these {len(targets)} detector(s)? This cannot be undone.",
+            default=False,
+        ).ask()
+        if not confirmed:
+            console.print("[yellow]Aborted. Nothing deleted.[/yellow]")
+            return
+
+    deleted = 0
+    failures: list[tuple[str, str]] = []
+    for it in targets:
+        obj_id = it.get("objectId", "")
+        try:
+            client.delete_settings_object(obj_id)
+            deleted += 1
+        except Exception as exc:
+            failures.append((config_title(it.get("value", {})), str(exc)))
+
+    console.print(f"\n[bold]Deleted {deleted} of {len(targets)} detector(s).[/bold]")
+    if failures:
+        console.print("\n[red bold]Errors:[/red bold]")
+        for title, msg in failures:
+            console.print(f"[red]• {title}[/red]\n  {msg}\n")
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ def test_all_modules_import():
     import importlib
 
     for name in [
-        "anomaly", "auth", "client", "config", "docs_scraper",
+        "anomaly", "auth", "client", "config",
         "extension_yaml", "extensions", "interactive", "models", "recommendations",
     ]:
         importlib.import_module(f"dynatrace_extension_alert_config.{name}")
@@ -59,9 +59,12 @@ def test_arg_parser_parses_flags(monkeypatch):
 # ── End-to-end orchestration (all I/O mocked) ────────────────────────────────
 
 class _FakeClient:
-    """Stand-in for DynatraceClient that records created objects."""
-    def __init__(self, *_, **__):
+    """Stand-in for DynatraceClient that records created/deleted objects."""
+    def __init__(self, *_, existing=None, **__):
         self.created: list[dict] = []
+        self.deleted: list[str] = []
+        # existing: list of {"objectId":..., "value": {...}}
+        self.existing = existing or []
 
     def get_schema(self, schema_id):
         return {"schemaId": schema_id}
@@ -69,6 +72,12 @@ class _FakeClient:
     def create_settings_object(self, payload):
         self.created.append(payload)
         return "vu9-OBJECT-ID"
+
+    def list_settings_objects(self, schema_id):
+        return self.existing
+
+    def delete_settings_object(self, object_id):
+        self.deleted.append(object_id)
 
 
 @pytest.fixture
@@ -141,3 +150,41 @@ def test_dump_schema_exits_without_resolving(monkeypatch, sample_extension):
         cli.main()
     assert exc.value.code == 0
     assert fake.created == []
+
+
+def test_idempotency_skips_existing(monkeypatch, sample_extension):
+    # Pre-seed the env with the exact detector --yes would create, so the
+    # second run must skip it (no duplicate POST).
+    from dynatrace_extension_alert_config.anomaly import build_payload
+    from dynatrace_extension_alert_config.interactive import run_auto_flow
+
+    choice = run_auto_flow(sample_extension)[0]
+    existing_value = build_payload(choice, "Meraki Extension", query_offset=1)["value"]
+
+    fake = _FakeClient(existing=[{"objectId": "obj-1", "value": existing_value}])
+    _patch_common(monkeypatch, fake, sample_extension)
+    monkeypatch.setattr(sys, "argv", [
+        "prog", "--name", "Meraki Extension", "--env-id", "abc12345", "--yes",
+    ])
+
+    cli.main()
+    assert fake.created == []  # identical config already exists -> skipped
+
+
+def test_undo_deletes_tool_created(monkeypatch, sample_extension):
+    tool = "dynatrace-extension-alert-config"
+    existing = [
+        {"objectId": "obj-keep", "value": {"title": "Other Ext - X", "source": tool}},
+        {"objectId": "obj-del", "value": {"title": "Meraki Extension - CPU Usage", "source": tool}},
+        {"objectId": "obj-foreign", "value": {"title": "Meraki Extension - CPU Usage", "source": "someone-else"}},
+    ]
+    fake = _FakeClient(existing=existing)
+    _patch_common(monkeypatch, fake, sample_extension)
+    monkeypatch.setattr(sys, "argv", [
+        "prog", "--name", "Meraki Extension", "--env-id", "abc12345", "--undo", "--yes",
+    ])
+
+    # --undo returns (no SystemExit) after deleting
+    cli.main()
+    # Only the tool-created object whose title matches the extension prefix
+    assert fake.deleted == ["obj-del"]

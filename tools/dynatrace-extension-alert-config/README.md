@@ -88,7 +88,7 @@ Before you run the tool, make sure all of the following are true:
 pip install -e tools/dynatrace-extension-alert-config/
 ```
 
-This exposes the `dynatrace-extension-alert-config` console command. Dependencies: `requests`, `questionary`, `beautifulsoup4`, `lxml`, `rich`, `pyyaml`.
+This exposes the `dynatrace-extension-alert-config` console command. Dependencies: `requests`, `questionary`, `rich`, `pyyaml`.
 
 ---
 
@@ -175,9 +175,32 @@ dynatrace-extension-alert-config --name meraki --env-id abc12345 --dump-schema
 | `--query-offset` | `1` | Detector query offset in minutes (1-60). See [section 11](#11-thresholds--sample-windows--what-is-set-and-why). |
 | `--scopes` | the five above | Override the OAuth scopes requested. Only add scopes your client actually has. |
 | `--reconfigure` | off | Re-enter and re-save the OAuth credentials. |
-| `--dry-run` | off | Print the JSON payloads; make **no** API calls. |
-| `--yes` | off | Non-interactive: create an **Auto-Adaptive Baseline / Above** detector for **every** metric, with **no** split dimensions. |
+| `--dry-run` | off | Print the JSON payloads (annotated with would-CREATE / would-SKIP); make **no** API calls. |
+| `--yes` | off | Non-interactive: create an **Auto-Adaptive Baseline / Above** detector for **every** metric, with **no** split dimensions. Also skips the `--undo` confirmation. |
+| `--undo` | off | **Delete** the detectors this tool created for `--name`. Confirms first unless `--yes`. |
 | `--dump-schema` | off | Print the live `builtin:davis.anomaly-detectors` schema JSON and exit. |
+
+### Safe to run twice (idempotency)
+
+Re-running the tool will **not** create duplicate detectors. Before creating, it reads the existing `builtin:davis.anomaly-detectors` objects and classifies each metric:
+
+- **identical** — a detector with the same title *and* the same model / threshold / query already exists → **skipped**.
+- **differs** — a detector with the same name exists but with different settings (e.g. you changed the threshold) → **skipped and flagged**, so you're never surprised by a silent duplicate. To replace it, `--undo` then re-run.
+- **new** — created.
+
+A summary line reports `created / already existed / differ / failed`.
+
+### Undoing
+
+```bash
+# Remove everything this tool created for an extension (asks for confirmation first)
+dynatrace-extension-alert-config --name "Meraki Extension" --env-id abc12345 --undo
+
+# Skip the confirmation
+dynatrace-extension-alert-config --name "Meraki Extension" --env-id abc12345 --undo --yes
+```
+
+Undo only ever touches objects **this tool created** (matched by the `source: dynatrace-extension-alert-config` tag) **and** whose name starts with `<Extension> - `, so it never deletes detectors you built by hand or for other extensions.
 
 ---
 
@@ -332,7 +355,7 @@ All of the above are editable in **Davis Anomaly Detection → (the config)** af
 
 ## 13. How an extension is resolved
 
-**Primary — environment API (authoritative):**
+The metric catalog is read **only** from the connected environment via the Extensions 2.0 API (authoritative). The extension must be installed/active in that environment.
 
 1. List installed extensions (`GET /api/v2/extensions`) and **fuzzy-match** your `--name` to a fully-qualified id (e.g. `com.dynatrace.extension.meraki`).
 2. Resolve its active version, then **download the extension package** and read `extension.yaml`.
@@ -341,7 +364,7 @@ All of the above are editable in **Davis Anomaly Detection → (the config)** af
    - **Feature set** per metric, applying inheritance: *metric > subgroup > group > `default`*.
    - **Dimensions** per metric: from the metric's `metadata.dimensions` **plus** inherited group/subgroup `dimensions`.
 
-**Fallback — docs scraping (last resort):** if the extension can't be read from the environment, the tool attempts the public docs page. This is unreliable because `docs.dynatrace.com` returns `HTTP 403` to automated requests, so the environment API path is strongly preferred.
+If the extension can't be resolved (not installed, name mismatch, or the token lacks `environment-api:extensions:read`), the run stops with an actionable error.
 
 ---
 
@@ -367,7 +390,7 @@ Trigger or wait for a test event and confirm the **event name** renders the plac
 |---|---|---|
 | `OAuth 400 Bad Request` at startup | A requested scope is invalid or not granted; SSO rejects the whole request. | Grant all five scopes ([section 6](#6-oauth-scopes--what-each-one-is-for)); confirm `resource` is your account URN. |
 | `403 Forbidden` on `/api/v2/extensions` | Token lacks `environment-api:extensions:read`. | Add that scope. The error now prints the exact required scope. |
-| `Could not resolve extension …` | Extension not installed, name mismatch, or docs fallback blocked. | Check the name/installation; the env-API path needs the extensions scope. |
+| `Could not resolve extension …` | Extension not installed, name mismatch, or the token lacks `environment-api:extensions:read`. | Confirm the extension is installed, check the name, and grant the extensions read scope. |
 | Create fails with `Validation failed for N Validators` | A payload field doesn't match the live schema. | The full message is printed under **Errors**. Run `--dump-schema` to compare against your tenant's schema. |
 | `queryOffset: Value must be between 1 and 60` | Offset out of range. | Use `--query-offset` with 1-60. |
 | `Access Token is invalid` on create | Token expired during a long interactive session. | Already handled — the client refreshes the token per request. If you still see it, re-run. |
